@@ -1,7 +1,5 @@
 import { render } from 'preact'
 
-// support shadowroot.adoptedStyleSheets in all browsers
-import 'construct-style-sheets-polyfill'
 import { TailwindTemplateRenderer } from './TailwindTemplateRenderer'
 import { fulfillWithDefaults } from '@store/ConfigReducer'
 import { ConfigState } from '@types'

@@ -1,5 +1,4 @@
 import {
-  CodeEditorOptionsEnum,
   ConfigActionTypes,
   ConfigReducerAction,
   ConfigState
@@ -34,7 +33,6 @@ export const defaultConfigState: ConfigState = {
   ignore_line_breaks: true,
   always_update: false,
   parse_jinja: true,
-  code_editor: CodeEditorOptionsEnum.ACE,
   entities: [],
   bindings: [],
   actions: [],
@@ -42,8 +40,8 @@ export const defaultConfigState: ConfigState = {
   plugins: {
     daisyui: {
       enabled: true,
-      url: DAISYUI_CDN_URL,
       theme: 'dark - dark',
+      themes: 'light --default, dark --prefersdark',
       overrideCardBackground: false
     },
     tailwindElements: {

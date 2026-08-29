@@ -14,6 +14,19 @@ export interface CustomCard {
   preview: boolean
 }
 
+/** Payload pushed by Home Assistant's `render_template` websocket command. */
+export type TemplateEvent = {
+  result?: string
+  error?: string
+  level?: string
+  listeners?: {
+    all: boolean
+    domains: string[]
+    entities: string[]
+    time: boolean
+  }
+}
+
 export type Binding = {
   bind: string
   selector: string
@@ -36,15 +49,28 @@ export type ConfigReducerAction = {
   payload: Partial<ConfigState> | object
 }
 
+/**
+ * @deprecated The card now always uses Home Assistant's own code editor.
+ * Retained so existing configs carrying `code_editor` still load.
+ */
 export enum CodeEditorOptionsEnum {
   ACE = 'Ace',
   TEXTAREA = 'Textarea',
   CODEMIRROR_DEV = 'CodeMirror_dev'
 }
 
-type PluginOptions = { enabled: boolean; url?: string; theme?: string }
+type PluginOptions = {
+  enabled: boolean
+  /** @deprecated daisyUI is compiled into the card; no CDN fetch is made. */
+  url?: string
+  theme?: string
+}
 
-type DaisyUIOptions = { overrideCardBackground: boolean }
+type DaisyUIOptions = {
+  overrideCardBackground: boolean
+  /** daisyUI theme list, e.g. `light --default, dark --prefersdark`. */
+  themes?: string
+}
 
 export type ConfigState = {
   entity: string
@@ -57,7 +83,8 @@ export type ConfigState = {
     daisyui: PluginOptions & DaisyUIOptions,
     tailwindElements: PluginOptions
   }
-  code_editor: CodeEditorOptionsEnum
+  /** @deprecated Ignored; Home Assistant's editor is always used. */
+  code_editor?: CodeEditorOptionsEnum
   bindings: Binding[]
   actions: Action[]
   debounceChangePeriod: number

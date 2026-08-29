@@ -10,53 +10,31 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
       - name: Build card
-        run: yarn && yarn build
+        run: npm run build
       - name: Check if tag is a prerelease
         id: check-tag
         run: |
-          if [[ ${{ github.event.ref }} =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+\-.+$ ]]; then
+          if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
               echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+              echo "prerelease=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Get latest non-prerelease
-        uses: cardinalby/git-get-release-action@v1
-        id: get-latest-non-prerelease
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          latest: 1
-          draft: false
-          prerelease: false
-      - name: Get latest release
-        uses: cardinalby/git-get-release-action@v1
-        id: get-latest-release
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          latest: 1
-          draft: false
-
-      - name: Generate CHANGELOG for release
-        if: steps.check-tag.outputs.prerelease != true
-        run: npx -y git-changelog-command-line -fr refs/tags/${{ steps.get-latest-non-prerelease.outputs.tag_name }} -of CHANGELOG-release.md
-
-      - name: Generate CHANGELOG for prerelease
-        if: steps.check-tag.outputs.prerelease
-        run: npx -y git-changelog-command-line -fr refs/tags/${{ steps.get-latest-release.outputs.tag_name }} -of CHANGELOG-release.md
-
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          body_path: CHANGELOG-release.md
-          append_body: true
           generate_release_notes: true
-          prerelease: "${{ steps.check-tag.outputs.prerelease }}"
+          prerelease: ${{ steps.check-tag.outputs.prerelease }}
           files: |
-            dist/*
+            dist/tailwind-template-card.js

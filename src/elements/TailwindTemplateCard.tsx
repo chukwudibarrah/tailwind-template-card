@@ -1,84 +1,111 @@
 import { render } from "preact";
 import { HaCard } from "@components/HaCard";
 
-// support shadowroot.adoptedStyleSheets in all browsers
-import "construct-style-sheets-polyfill";
 import { TailwindTemplateRenderer } from "./TailwindTemplateRenderer";
 import { initialConfigState } from "@store/ConfigReducer";
-import { Action, Binding } from "@types";
+import { Action, Binding, TemplateEvent } from "@types";
 import { HomeAssistant } from "custom-card-helpers";
-import _ from "lodash";
+import { CONFIG_TYPE } from "@/src/constants";
 
 console.info(
-  `%c  TailwindCSS Template Card  \n%c  Version ${CARD_VERSION}  \n%c  Star it at http://github.com/usernein/tailwindcss-template-card!`,
+  `%c  Tailwind Template Card  \n%c  Version ${CARD_VERSION}  \n%c  github.com/chukwudibarrah/tailwind-template-card`,
   "color: #2d2c35; font-weight: bold; background: #f5f6f9",
   "color: #aef3fc; font-weight: bold; background: #2d2c35",
   "color: #aef3fc; font-weight: bold; background: #2d2c35",
 );
 
+/**
+ * Matches entity-id shaped tokens (`domain.object_id`). Used to discover which
+ * entities a template / binding / action refers to without scanning the whole
+ * state machine on every update.
+ */
+const ENTITY_ID_PATTERN = /\b[a-z_]+\.[a-z0-9_]+\b/g;
+
 export class TailwindTemplateCard extends TailwindTemplateRenderer {
   _entitiesToWatch: string[] = [];
   _htmlContent: string = "";
 
-  constructor() {
-    super();
-  }
+  /** Unsubscribe handle for the active `render_template` subscription. */
+  _templateUnsub: (() => void) | null = null;
+  /** The template string the active subscription was opened for. */
+  _subscribedContent: string | null = null;
+  /**
+   * Incremented on every (re)subscribe so that results arriving from a
+   * superseded subscription are discarded instead of clobbering the DOM.
+   */
+  _subscriptionGeneration = 0;
+  /** Entities HA reported the current template actually depends on. */
+  _listenerEntities: string[] = [];
+  _isConnected = false;
 
   static getConfigElement() {
-    return document.createElement("tailwindcss-template-card-config");
+    return document.createElement(CONFIG_TYPE);
   }
 
   static getStubConfig() {
     return initialConfigState;
   }
 
+  connectedCallback() {
+    this._isConnected = true;
+    // Re-open the subscription that disconnectedCallback tore down.
+    if (this._hass && this._config?.content !== undefined) {
+      this._render(true);
+    }
+  }
+
+  disconnectedCallback() {
+    this._isConnected = false;
+    this.unsubscribeTemplate();
+  }
+
+  unsubscribeTemplate() {
+    if (this._templateUnsub) {
+      try {
+        this._templateUnsub();
+      } catch (e) {
+        console.debug("failed to unsubscribe template", e);
+      }
+      this._templateUnsub = null;
+    }
+    this._subscribedContent = null;
+  }
+
+  /**
+   * Collect the entities this card depends on.
+   *
+   * Upstream scanned every entity in `hass.states` and string-matched it
+   * against the content, which is O(number of entities) per update and misses
+   * entities that only appear in `actions`. We instead extract entity-shaped
+   * tokens from the config itself and intersect with the state machine, then
+   * union with the dependency list HA reports for the rendered template.
+   */
   updateEntitiesToWatch() {
-    this._entitiesToWatch = [];
+    if (!this._hass || !this._config) return;
 
-    if (this._config.entity) {
-      this._entitiesToWatch.push(this._config.entity);
+    const watched = new Set<string>();
+
+    if (this._config.entity) watched.add(this._config.entity);
+
+    if (Array.isArray(this._config.entities)) {
+      this._config.entities.forEach((entity: string) => watched.add(entity));
     }
 
-    if (this._config.entities && Array.isArray(this._config.entities)) {
-      this._config.entities.forEach((entity: string) => {
-        this._entitiesToWatch.push(entity);
-      });
+    // Entities HA told us the template depends on — authoritative for Jinja.
+    this._listenerEntities.forEach((entity) => watched.add(entity));
+
+    const sources = [
+      this._config.content ?? "",
+      ...(this._config.bindings ?? []).map((b: Binding) => b.bind ?? ""),
+      ...(this._config.actions ?? []).map((a: Action) => a.call ?? ""),
+    ].join("\n");
+
+    const matches = sources.match(ENTITY_ID_PATTERN) ?? [];
+    for (const candidate of matches) {
+      if (this._hass.states[candidate]) watched.add(candidate);
     }
 
-    this.watchMentionedEntities();
-  }
-
-  watchMentionedEntities() {
-    if (!this._hass || !this._config || this._config.content === undefined)
-      return;
-
-    Object.keys(this._hass.states).forEach((entity_id: string) => {
-      if (!this._hass || !this._config || this._config.content === undefined) {
-        return false;
-      }
-
-      const content = this._config.content;
-
-      if (
-        content.includes(entity_id) ||
-        this.checkIfEntityIsUsedByBinding(entity_id)
-      ) {
-        this._entitiesToWatch.push(entity_id);
-      }
-    });
-  }
-
-  checkIfEntityIsUsedByBinding(entity_id: string) {
-    if (!this._hass || !this._config || this._config.content === undefined) {
-      return null;
-    }
-
-    for (const binding of this._config.bindings) {
-      if (binding.bind.includes(entity_id)) {
-        return true;
-      }
-    }
-    return false;
+    this._entitiesToWatch = [...watched];
   }
 
   renderIfNeeded(forceUpdate?: boolean) {
@@ -89,38 +116,19 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
 
   needsRender() {
     if (!this._hass || !this._oldHass) {
-      console.debug("needsRender: no hass");
-      return true;
-    }
-    if (!this._entitiesToWatch) {
-      console.debug("needsRender: no entities to watch");
       return true;
     }
 
     if (this._config.always_update) {
-      console.debug("needsRender: always_update");
       return true;
     }
 
-    // if (!_.isEqual(this._oldConfig["bindings"], this._config["bindings"])) {
-    //   console.debug("needsRender: bindings changed");
-    //
-    //   return true;
-    // }
-
+    // Home Assistant replaces a state object whenever that entity changes and
+    // keeps the same reference when it doesn't, so identity comparison is both
+    // correct and far cheaper than a deep equality walk. It can only ever
+    // over-report a change, never miss one.
     for (const entity_id of this._entitiesToWatch) {
-      if (!this._hass.states[entity_id]) continue;
-      if (
-        !_.isEqual(
-          this._oldHass.states[entity_id],
-          this._hass.states[entity_id],
-        ) ||
-        !_.isEqual(
-          this._oldHass.states[entity_id].attributes,
-          this._hass.states[entity_id].attributes,
-        )
-      ) {
-        console.debug("needsRender: entity changed", entity_id);
+      if (this._oldHass.states[entity_id] !== this._hass.states[entity_id]) {
         return true;
       }
     }
@@ -146,21 +154,72 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
     }
 
     if (!this._config.parse_jinja) {
+      this.unsubscribeTemplate();
       this._htmlContent = content;
       this._renderHtmlContent();
       return;
     }
 
-    this._hass.connection.subscribeMessage(
-      (msg: { result: string }) => {
-        this._htmlContent = msg.result;
-        this._renderHtmlContent();
-      },
-      {
-        type: "render_template",
-        template: content,
-      },
-    );
+    // HA pushes a new result whenever the template's dependencies change, so
+    // one subscription per template string is all we ever need. Re-subscribing
+    // on each state change (as upstream did) leaks a subscription per update.
+    if (this._templateUnsub && this._subscribedContent === content) {
+      // Already subscribed to exactly this template; bindings still need to be
+      // reapplied against the latest hass state.
+      this.applyBindings();
+      return;
+    }
+
+    this.subscribeTemplate(content);
+  }
+
+  subscribeTemplate(content: string) {
+    if (!this._hass) return;
+
+    this.unsubscribeTemplate();
+
+    const generation = ++this._subscriptionGeneration;
+    this._subscribedContent = content;
+
+    this._hass.connection
+      .subscribeMessage<TemplateEvent>(
+        (msg) => {
+          // A newer subscription superseded this one while it was opening.
+          if (generation !== this._subscriptionGeneration) return;
+
+          if (msg.error) {
+            console.error("template error:", msg.error);
+            return;
+          }
+
+          if (msg.listeners?.entities) {
+            this._listenerEntities = msg.listeners.entities;
+          }
+
+          this._htmlContent = msg.result ?? "";
+          this.updateEntitiesToWatch();
+          this._renderHtmlContent();
+        },
+        {
+          type: "render_template",
+          template: content,
+          report_errors: true,
+        },
+      )
+      .then((unsub) => {
+        if (generation !== this._subscriptionGeneration || !this._isConnected) {
+          // Superseded or detached before the subscription resolved.
+          unsub();
+          return;
+        }
+        this._templateUnsub = unsub;
+      })
+      .catch((e) => {
+        console.error("failed to subscribe to template", e);
+        if (generation === this._subscriptionGeneration) {
+          this._subscribedContent = null;
+        }
+      });
   }
 
   _render(forceRender?: boolean) {
@@ -168,8 +227,11 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
     this.renderIfNeeded(forceRender);
   }
 
-  _renderHtmlContent() {
+  async _renderHtmlContent() {
     this.ensureIsReadyForRender();
+
+    // Compile styles before painting so content never flashes unstyled.
+    await this.applyStyles(this.candidatesFromHtml(this._htmlContent));
 
     this._deRender();
     render(
@@ -182,6 +244,9 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
     );
 
     this.applyBindings();
+
+    // Bindings may have introduced classes that were not in the source HTML.
+    await this.applyStyles(this.candidatesFromDom());
   }
 
   ensureIsReadyForRender() {
@@ -219,7 +284,7 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
             target.innerHTML = result;
             break;
           case "class":
-            result && target.classList.add(result);
+            if (result) target.classList.add(result);
             break;
           case "checked":
             targetAsInput.checked = Boolean(result);
@@ -261,16 +326,55 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
       }
     }
 
+    // Opens Home Assistant's own entity dialog, the way built-in cards do.
+    const moreInfo = (entityId?: string) => this.fireMoreInfo(entityId);
+
     this._config.actions.forEach(({ call, selector, type }: Action) => {
       if (!selector || !call || !type) return;
 
       const target = e.target as HTMLElement;
 
-      if (type === e.type && target.matches(selector)) {
-        const executeCall = new Function("hass", "config", "entity", call);
-        executeCall.call(e.target, hass, config, entity);
+      // `closest` rather than `matches` so an action bound to a card/tile
+      // still fires when the user taps an icon or label inside it.
+      if (type === e.type && target.closest(selector)) {
+        const executeCall = new Function(
+          "hass",
+          "config",
+          "entity",
+          "moreInfo",
+          "event",
+          call,
+        );
+        executeCall.call(
+          target.closest(selector),
+          hass,
+          config,
+          entity,
+          moreInfo,
+          e,
+        );
       }
     });
+  }
+
+  /**
+   * Fires the event Home Assistant listens for to open its entity dialog.
+   * Defaults to the card's configured `entity` when none is given.
+   */
+  fireMoreInfo(entityId?: string) {
+    const target = entityId ?? this._config?.entity;
+    if (!target) {
+      console.warn("moreInfo() needs an entity id (or a configured `entity`)");
+      return;
+    }
+
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        bubbles: true,
+        composed: true,
+        detail: { entityId: target },
+      }),
+    );
   }
 
   resolveBindValue(element: Element, bind: string) {

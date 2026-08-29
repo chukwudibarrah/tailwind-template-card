@@ -1,16 +1,11 @@
 import { HomeAssistant } from 'custom-card-helpers'
 import { render } from 'preact'
-import config from '@/twind.config'
-import { twind, cssom, observe } from '@twind/core'
-
-// support shadowroot.adoptedStyleSheets in all browsers
-import 'construct-style-sheets-polyfill'
-import axios from 'axios'
 import { fulfillWithDefaults } from '@store/ConfigReducer'
 
 import generatedCss from '@/src/index.css?inline'
 import { ConfigState } from '@types'
 import { CardEvents, dispatchCardEvent } from '@utils/events'
+import { TailwindEngine, extractCandidates } from '@/src/styles/TailwindEngine'
 
 export abstract class TailwindTemplateRenderer extends HTMLElement {
   _hass: HomeAssistant | undefined
@@ -24,6 +19,11 @@ export abstract class TailwindTemplateRenderer extends HTMLElement {
   _rerender_after_set_hass = true
   _dispatch_config_setup_event = false
 
+  /** Sheet holding the compiled utilities for the current content. */
+  _utilitySheet: CSSStyleSheet | null = null
+  /** Entry stylesheet the utility sheet was compiled from. */
+  _entryCss: string = ''
+
   constructor () {
     super()
 
@@ -32,7 +32,6 @@ export abstract class TailwindTemplateRenderer extends HTMLElement {
 
   setConfig (config: Partial<ConfigState>) {
     const inSetup = Object.keys(this._oldConfig).length === 0
-    const pluginsConfigHasChanged = config.plugins !== this._oldConfig.plugins
 
     this._oldConfig = this._config
     this._config = fulfillWithDefaults(config)
@@ -41,66 +40,80 @@ export abstract class TailwindTemplateRenderer extends HTMLElement {
     if (this._dispatch_config_setup_event && !Object.keys(this._oldConfig).length)
       dispatchCardEvent(CardEvents.CONFIG_SETUP, { config })
 
-    if (pluginsConfigHasChanged || inSetup) {
-      this.injectStylesheets(this._config)
-    }
+    if (inSetup) this.initStylesheets()
 
     if (!this._oldConfig || this._rerender_after_set_config) this._render(true)
   }
 
-  async injectStylesheets ({ plugins }: ConfigState) {
-    const adoptedStyleSheets = [] as CSSStyleSheet[]
+  /**
+   * Seeds the shadow root with the card's own build-time stylesheet plus an
+   * empty sheet that `applyStyles` fills with compiled utilities.
+   *
+   * Upstream also copied every `<style>` element out of the document head into
+   * each card's shadow root. That duplicated Home Assistant's entire
+   * stylesheet per card and let its rules fight the user's utility classes,
+   * which is what made backgrounds and borders unstyleable. The shadow root is
+   * already isolated, so nothing needs to be copied in.
+   */
+  initStylesheets () {
+    const generatedSheet = new CSSStyleSheet()
+    generatedSheet.replaceSync(generatedCss)
 
-    const generatedSheet = cssom(new CSSStyleSheet())
-    generatedSheet.target.replaceSync(generatedCss)
-    adoptedStyleSheets.push(generatedSheet.target)
+    this._utilitySheet = new CSSStyleSheet()
 
-    const sheet = cssom(new CSSStyleSheet())
-    const tw = twind(config, sheet)
+    this.shadow.adoptedStyleSheets = [generatedSheet, this._utilitySheet]
+  }
 
-    const styles = document.querySelector('head')?.querySelectorAll('style')
+  /** Entry stylesheet implied by the current plugin configuration. */
+  get entryCss (): string {
+    const daisyui = this._config?.plugins?.daisyui
 
-    if (styles) {
-      styles.forEach(elem => {
-        if (elem.getAttribute('data-daisyui')) return
-        const om = cssom(new CSSStyleSheet())
-        om.target.replaceSync(elem.innerHTML)
-        adoptedStyleSheets.push(om.target)
-      })
+    return TailwindEngine.buildEntryCss({
+      daisyui: this._force_daisyui || Boolean(daisyui?.enabled),
+      daisyuiThemes: daisyui?.themes
+    })
+  }
+
+  /**
+   * Compiles the given utility classes and swaps them into the shadow root.
+   * Awaited before the DOM is rendered so content never paints unstyled.
+   */
+  async applyStyles (candidates: string[]) {
+    if (!this._utilitySheet) this.initStylesheets()
+
+    const entryCss = this.entryCss
+    if (entryCss !== this._entryCss) {
+      this._entryCss = entryCss
     }
 
-    const getDaisyUIStyle = () => {
-      return document.querySelector('head style[data-daisyui]')
+    try {
+      const css = await TailwindEngine.build(entryCss, candidates)
+      this._utilitySheet?.replaceSync(css)
+    } catch (e) {
+      console.error('failed to compile Tailwind styles', e)
     }
+  }
 
-    if (this._force_daisyui || plugins.daisyui.enabled) {
-      const daisyStyle = getDaisyUIStyle()
-      if (!daisyStyle) {
-        const elem = document.createElement('style')
-        elem.setAttribute('data-daisyui', 'true')
-        elem.setAttribute('type', 'text/css')
+  /** Utility classes in the HTML the card is about to render. */
+  candidatesFromHtml (html: string): string[] {
+    return extractCandidates(html)
+  }
 
-        const daisyCDN = plugins.daisyui.url ?? DAISYUI_CDN_URL
-        const res = await axios.get(daisyCDN)
+  /**
+   * Utility classes actually present in the rendered DOM.
+   *
+   * Bindings can introduce classes that appear nowhere in the source HTML
+   * (`type: class`, or markup injected via `type: html`), so the compiled
+   * stylesheet is topped up from the live DOM once bindings have run.
+   */
+  candidatesFromDom (): string[] {
+    const found = new Set<string>()
 
-        elem.innerHTML = res.data
-        document.head.appendChild(elem)
-      }
+    this.shadow.querySelectorAll('[class]').forEach(element => {
+      element.classList.forEach(name => found.add(name))
+    })
 
-      const daisySheet = getDaisyUIStyle()
-      if (daisySheet instanceof HTMLStyleElement) {
-        if (daisySheet.sheet !== null) {
-          const stylesheet = new CSSStyleSheet()
-          stylesheet.replaceSync(daisySheet.innerHTML)
-          adoptedStyleSheets.push(stylesheet)
-        }
-      }
-    }
-
-    adoptedStyleSheets.push(sheet.target)
-
-    this.shadow.adoptedStyleSheets = adoptedStyleSheets
-    observe(tw, this.shadow)
+    return [...found]
   }
 
   public set hass (hass: HomeAssistant) {

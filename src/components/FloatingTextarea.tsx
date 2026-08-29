@@ -21,7 +21,7 @@ export function FloatingTextarea ({
         autoComplete={'off'}
         spellcheck={false}
       /> */}
-      <ContentEditor additionalOptions={{showGutter: false, highlightActiveLine: false}} className='w-full h-full' mode={mode} />
+      <ContentEditor className='w-full h-full' mode={mode} />
       <label
         for='floating_outlined'
         class='flex text-base-content peer-hover:text-[hsl(var(--a))] peer-hover:scale-110 peer-focus:scale-110 peer-focus:text-[hsl(var(--a))] duration-300 w-fit opacity-100 peer-placeholder-shown:hidden'

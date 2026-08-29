@@ -65,7 +65,7 @@ export function HaCardConfig () {
 
         {activeState[0].index == 0 && <SettingsCardContent />}
         {activeState[0].index == 1 && (
-          <SettingsTweaks inHiddenMode={activeState[0].inHiddenMode} />
+          <SettingsTweaks />
         )}
         {activeState[0].index == 2 && <SettingsPlugins />}
         {/* {activeState[0].index == 3 && <SettingsAbout />} */}

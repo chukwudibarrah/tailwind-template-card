@@ -6,7 +6,7 @@ export function InputCodeEditor ({
   value,
   onChange,
   className,
-  mode = 'html',
+  mode = 'jinja2',
   emulateTextarea = false
 }: {
   label: string
@@ -34,7 +34,6 @@ export function InputCodeEditor ({
       <CodeEditor
         defaultValue={value}
         onChange={onChange}
-        additionalOptions={{ showGutter: false, highlightActiveLine: false }}
         className='w-full h-full'
         mode={mode}
       />

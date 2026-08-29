@@ -1,7 +1,7 @@
 export enum CardEvents {
-  CONFIG_RECEIVED = 'tailwindcss-template-card-config-received',
-  CONFIG_CHANGED = 'tailwindcss-template-card-config-changed',
-  CONFIG_SETUP = 'tailwindcss-template-card-config-setup'
+  CONFIG_RECEIVED = 'tailwind-template-card-config-received',
+  CONFIG_CHANGED = 'tailwind-template-card-config-changed',
+  CONFIG_SETUP = 'tailwind-template-card-config-setup'
 }
 
 export const dispatchCardEvent = (

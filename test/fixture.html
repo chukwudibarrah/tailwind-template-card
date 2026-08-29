@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8" /><title>card harness</title></head>
+  <body>
+    <div id="host"></div>
+    <script>
+      window.customCards = []
+      window.__ready = false
+    </script>
+    <script type="module" src="/dist/tailwind-template-card.js"></script>
+    <script type="module">
+      // Minimal Home Assistant stub. `render_template` echoes the template
+      // back so the test controls the exact HTML the card renders.
+      const states = {
+        'sensor.living_room_temperature': {
+          entity_id: 'sensor.living_room_temperature',
+          state: '24.4',
+          attributes: { unit_of_measurement: '°C' }
+        },
+        'light.living_room': {
+          entity_id: 'light.living_room',
+          state: 'on',
+          attributes: { friendly_name: 'Living Room' }
+        }
+      }
+
+      window.__subscriptions = { opened: 0, closed: 0 }
+
+      window.__makeHass = () => ({
+        states,
+        services: { light: { toggle: {} } },
+        callService: (domain, service, data) => {
+          window.__lastServiceCall = { domain, service, data }
+          return Promise.resolve()
+        },
+        connection: {
+          subscribeMessage: (cb, msg) => {
+            window.__subscriptions.opened++
+            queueMicrotask(() =>
+              cb({
+                result: msg.template,
+                listeners: {
+                  all: false,
+                  domains: [],
+                  entities: ['sensor.living_room_temperature'],
+                  time: false
+                }
+              })
+            )
+            return Promise.resolve(() => {
+              window.__subscriptions.closed++
+            })
+          }
+        }
+      })
+
+      window.__ready = true
+    </script>
+  </body>
+</html>

@@ -31,6 +31,10 @@
       "@elements/*": ["./elements/*"],
       "@types": ["./types"],
       "@utils/*": ["./utils/*"],
+      /* Resolve React types through preact/compat so React-typed libraries
+         (react-icons, react-ace) typecheck against Preact's JSX. */
+      "react": ["../node_modules/preact/compat/"],
+      "react-dom": ["../node_modules/preact/compat/"],
     }
   },
   "include": ["src"],
