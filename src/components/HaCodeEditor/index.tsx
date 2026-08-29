@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { TextareaEditor } from '@components/TextareaEditor'
+import { closeTagEdit, expandTagEdit, indentOf } from './htmlEditing'
 
 /**
  * The subset of `ha-code-editor`'s API this wrapper drives.
@@ -7,7 +8,25 @@ import { TextareaEditor } from '@components/TextareaEditor'
  * Home Assistant supports two modes only — `yaml` and `jinja2` (the latter is
  * Jinja layered on a YAML base). There is no HTML or JavaScript mode.
  */
+type EditorView = {
+  state: {
+    doc: {
+      length: number
+      sliceString: (from: number, to: number) => string
+      lineAt: (pos: number) => { text: string }
+    }
+    selection: { main: { head: number; empty: boolean } }
+  }
+  dispatch: (spec: {
+    changes: { from: number; to: number; insert: string }
+    selection: { anchor: number }
+    userEvent?: string
+  }) => void
+}
+
 type HaCodeEditorElement = HTMLElement & {
+  /** CodeMirror view, exposed publicly by ha-code-editor. */
+  codemirror?: EditorView
   value: string
   mode: string
   autocompleteEntities: boolean
@@ -22,6 +41,50 @@ const ELEMENT_NAME = 'ha-code-editor'
 
 /** How long to wait for Home Assistant to lazily register its editor. */
 const DEFINITION_TIMEOUT_MS = 4000
+
+/**
+ * Restores the tag handling upstream's Ace editor provided.
+ *
+ * Transactions are dispatched as plain objects, which CodeMirror accepts, so
+ * this needs no CodeMirror import and cannot conflict with the copy Home
+ * Assistant already loaded.
+ */
+const attachHtmlEditing = (editor: HaCodeEditorElement) => {
+  const onKeyDown = (event: KeyboardEvent) => {
+    const view = editor.codemirror
+    if (!view || event.defaultPrevented) return
+    if (event.ctrlKey || event.metaKey || event.altKey) return
+    if (event.key !== '>' && event.key !== 'Enter') return
+
+    const { doc, selection } = view.state
+    const range = selection.main
+    if (!range.empty) return
+
+    const caret = range.head
+    const before = doc.sliceString(Math.max(0, caret - 500), caret)
+    const after = doc.sliceString(caret, Math.min(doc.length, caret + 2))
+
+    const edit =
+      event.key === '>'
+        ? closeTagEdit(before)
+        : expandTagEdit(before, after, indentOf(doc.lineAt(caret).text))
+
+    if (!edit) return
+
+    // Stop the event reaching CodeMirror; this replaces its handling entirely.
+    event.preventDefault()
+    event.stopPropagation()
+
+    view.dispatch({
+      changes: { from: caret, to: caret, insert: edit.insert },
+      selection: { anchor: caret + edit.caret },
+      userEvent: 'input.type'
+    })
+  }
+
+  editor.addEventListener('keydown', onKeyDown, true)
+  return () => editor.removeEventListener('keydown', onKeyDown, true)
+}
 
 /**
  * Wraps Home Assistant's own CodeMirror editor.
@@ -43,12 +106,15 @@ export function HaCodeEditor ({
   onChange,
   mode = 'jinja2',
   linewrap = true,
+  html = true,
   className
 }: {
   defaultValue: string
   onChange: (value: string) => void
   mode?: string
   linewrap?: boolean
+  /** Close tags and expand them on Enter, as the old Ace editor did. */
+  html?: boolean
   className?: string
 }) {
   const [available, setAvailable] = useState(
@@ -92,7 +158,6 @@ export function HaCodeEditor ({
     editor.linewrap = linewrap
     editor.hasToolbar = false
     editor.disableFullscreen = true
-    editor.style.height = '100%'
     editor.style.display = 'block'
 
     const handleChange = (e: Event) => {
@@ -107,7 +172,10 @@ export function HaCodeEditor ({
     container.appendChild(editor)
     editorRef.current = editor
 
+    const detachHtmlEditing = html ? attachHtmlEditing(editor) : undefined
+
     return () => {
+      detachHtmlEditing?.()
       editor.removeEventListener('value-changed', handleChange)
       editor.remove()
       editorRef.current = null
@@ -115,7 +183,7 @@ export function HaCodeEditor ({
     // `defaultValue` is deliberately excluded from the dependencies: it seeds
     // the editor, and re-running this on every keystroke would rebuild the
     // element and destroy the caret. External changes are handled below.
-  }, [available, mode, linewrap])
+  }, [available, mode, linewrap, html])
 
   // Adopt external changes (e.g. a different card loaded into the editor)
   // without disturbing the caret while the user is typing.
@@ -136,5 +204,7 @@ export function HaCodeEditor ({
     )
   }
 
-  return <div class={className} style={{ height: '100%' }} ref={containerRef} />
+  // No forced height: ha-code-editor sizes itself to its content, so the
+  // wrapper caps it and scrolls instead of overflowing onto its siblings.
+  return <div class={className} ref={containerRef} />
 }

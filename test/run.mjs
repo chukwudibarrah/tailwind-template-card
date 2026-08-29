@@ -260,6 +260,12 @@ const editor = await page.evaluate(async () => {
   // Register a stand-in for Home Assistant's editor and let it upgrade.
   let lastAssignedValue = null
   class FakeHaCodeEditor extends HTMLElement {
+    connectedCallback() {
+      // ha-code-editor only sets `display: block` on its host and lets
+      // CodeMirror size itself, so with real content it is very tall.
+      this.style.display = 'block'
+      this.innerHTML = '<div style="height:1200px"></div>'
+    }
     set value(v) { lastAssignedValue = v; this._value = v }
     get value() { return this._value ?? '' }
   }
@@ -388,6 +394,145 @@ check(
   registered.boxShadow && registered.boxShadow !== 'none',
   `box-shadow=${registered.boxShadow}`
 )
+
+// --- HTML tag handling in the config editor --------------------------------
+const tags = await page.evaluate(async () => {
+  // The pure logic is bundled into the card; drive it through a stub editor
+  // that mimics the slice of CodeMirror's API the handler uses.
+  const el = document.createElement('tailwind-template-card-config')
+  document.getElementById('host').appendChild(el)
+  el.hass = window.__makeHass()
+  el.setConfig({ content: '' })
+  await new Promise((r) => setTimeout(r, 400))
+
+  const makeView = (text, caret) => {
+    let doc = text
+    let head = caret
+    return {
+      applied: () => ({ doc, head }),
+      state: {
+        get doc() {
+          return {
+            get length() { return doc.length },
+            sliceString: (a, b) => doc.slice(a, b),
+            lineAt: (pos) => {
+              const start = doc.lastIndexOf('\n', pos - 1) + 1
+              const end = doc.indexOf('\n', pos)
+              return { text: doc.slice(start, end === -1 ? undefined : end) }
+            }
+          }
+        },
+        selection: { main: { head, empty: true } }
+      },
+      dispatch: (spec) => {
+        doc = doc.slice(0, spec.changes.from) + spec.changes.insert + doc.slice(spec.changes.to)
+        head = spec.selection.anchor
+      }
+    }
+  }
+
+  // Register a stand-in editor so the wrapper mounts and attaches its handler.
+  let attached = null
+  class FakeCM extends HTMLElement {
+    set value(v) { this._value = v }
+    get value() { return this._value ?? '' }
+  }
+  if (!customElements.get('ha-code-editor')) customElements.define('ha-code-editor', FakeCM)
+
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 50))
+    attached = el.shadowRoot.querySelector('ha-code-editor')
+    if (attached) break
+  }
+  if (!attached) return { error: 'editor never mounted' }
+
+  const press = (text, caret, key) => {
+    const view = makeView(text, caret)
+    attached.codemirror = view
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, composed: true, cancelable: true })
+    attached.dispatchEvent(ev)
+    return { ...view.applied(), handled: ev.defaultPrevented }
+  }
+
+  return {
+    closeDiv: press('<div', 4, '>'),
+    voidTag: press('<img', 4, '>'),
+    selfClosing: press('<br /', 5, '>'),
+    insideAttr: press('<div class="a>b', 15, '>'),
+    expand: press('<div></div>', 5, 'Enter'),
+    indented: press('  <div></div>', 7, 'Enter'),
+    plainEnter: press('hello', 5, 'Enter')
+  }
+})
+
+if (tags.error) {
+  check('config editor mounts for tag tests', false, tags.error)
+} else {
+  check('typing > closes the tag', tags.closeDiv.doc === '<div></div>' && tags.closeDiv.head === 5,
+    `doc=${JSON.stringify(tags.closeDiv.doc)} caret=${tags.closeDiv.head}`)
+  check('void elements are not closed', !tags.voidTag.handled, `doc=${JSON.stringify(tags.voidTag.doc)}`)
+  check('self-closing tags are left alone', !tags.selfClosing.handled, `doc=${JSON.stringify(tags.selfClosing.doc)}`)
+  check('> inside an attribute value is literal', !tags.insideAttr.handled, `doc=${JSON.stringify(tags.insideAttr.doc)}`)
+  check('Enter between tags opens them out',
+    tags.expand.doc === '<div>\n  \n</div>' && tags.expand.head === 8,
+    `doc=${JSON.stringify(tags.expand.doc)} caret=${tags.expand.head}`)
+  check('Enter keeps the existing indent',
+    tags.indented.doc === '  <div>\n    \n  </div>',
+    `doc=${JSON.stringify(tags.indented.doc)}`)
+  check('Enter elsewhere is left to CodeMirror', !tags.plainEnter.handled)
+}
+
+// --- The editor must not overflow onto the panels below it ----------------
+const layout = await page.evaluate(async () => {
+  const el = document.createElement('tailwind-template-card-config')
+  document.getElementById('host').appendChild(el)
+  el.hass = window.__makeHass()
+  el.setConfig({ content: '<div class="flex">x</div>' })
+
+  let editor = null
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 50))
+    editor = el.shadowRoot.querySelector('ha-code-editor')
+    if (editor) break
+  }
+  if (!editor) return { error: 'editor never mounted' }
+  await new Promise((r) => setTimeout(r, 300))
+
+  const wrapper = editor.parentElement
+  const wrapperBox = wrapper.getBoundingClientRect()
+  const overflowY = getComputedStyle(wrapper).overflowY
+
+  // The Bindings / Actions panels are the collapse blocks after the editor.
+  const panels = [...el.shadowRoot.querySelectorAll('.collapse')]
+  const panelTops = panels.map((p) => p.getBoundingClientRect().top)
+
+  return {
+    editorHeight: editor.getBoundingClientRect().height,
+    wrapperHeight: wrapperBox.height,
+    wrapperBottom: wrapperBox.bottom,
+    scrolls: wrapper.scrollHeight > wrapper.clientHeight + 1,
+    overflowY,
+    panelCount: panels.length,
+    firstPanelTop: panelTops.length ? Math.min(...panelTops) : null
+  }
+})
+
+if (layout.error) {
+  check('config editor lays out', false, layout.error)
+} else {
+  check(
+    'tall editor is bounded rather than overflowing',
+    layout.wrapperHeight < layout.editorHeight,
+    `wrapper=${Math.round(layout.wrapperHeight)} editor=${Math.round(layout.editorHeight)}`
+  )
+  check('bounded editor scrolls its own content', layout.scrolls,
+    `overflow-y=${layout.overflowY} scrollH>clientH=${layout.scrolls}`)
+  check(
+    'Bindings/Actions sit below the editor, not over it',
+    layout.panelCount >= 2 && layout.firstPanelTop >= layout.wrapperBottom - 1,
+    `panels=${layout.panelCount} firstTop=${Math.round(layout.firstPanelTop)} editorBottom=${Math.round(layout.wrapperBottom)}`
+  )
+}
 
 check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
 

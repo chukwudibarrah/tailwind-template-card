@@ -20,7 +20,7 @@ export const SettingsActions = () => {
       <input type='checkbox' className='peer' />
       <div className='collapse-title text-md font-medium'>Actions</div>
       <div className='collapse-content flex flex-col w-full max-w-full overflow-hidden'>
-        <div className='scrollbar-thin scrollbar-track-base-200 scrollbar-thumb-white/5 overflow-x-scroll w-full'>
+        <div className=' overflow-x-scroll w-full'>
           <div className='gap-2 p-2 grid grid-rows-3 grid-flow-col-dense w-full max-h-64 empty:hidden '>
             {actions.map((action: Action, index: keyof typeof actions) => (
               <ActionConfig

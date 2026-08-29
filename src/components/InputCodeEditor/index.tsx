@@ -34,8 +34,9 @@ export function InputCodeEditor ({
       <CodeEditor
         defaultValue={value}
         onChange={onChange}
-        className='w-full h-full'
+        className='w-full'
         mode={mode}
+        html={false}
       />
       <label
         for='floating_outlined'

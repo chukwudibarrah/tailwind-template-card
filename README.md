@@ -217,6 +217,23 @@ entities:
 
 `plugins.daisyui.url` is accepted but ignored — daisyUI is compiled in rather than fetched from a CDN.
 
+## The config editor
+
+The visual editor uses Home Assistant's own `ha-code-editor`, so it inherits the
+frontend's theme, keybindings and entity autocompletion — type `states('` and it
+offers your entities.
+
+That editor ships only `yaml` and `jinja2` CodeMirror languages, with no HTML
+mode, so tag handling is added on top:
+
+- Typing `>` after an opening tag closes it — `<div` becomes `<div></div>` with
+  the caret in the middle. Void elements (`<br>`, `<img>`, …), self-closing tags
+  and a `>` inside an attribute value are left alone.
+- Pressing Enter between `>` and `</` opens the element out over three lines and
+  indents the caret.
+
+Everything else — brackets, quotes, undo — is CodeMirror's own behaviour.
+
 ## Tailwind v4 notes
 
 This card runs **real Tailwind CSS v4**, so v4 syntax works: `size-*`, `text-balance`, container queries (`@container`), and the v4 gradient utilities (`bg-linear-to-r`). Colours are emitted in `oklch`/`oklab`.
@@ -249,10 +266,10 @@ The one case not covered is a class applied by your own JavaScript at some arbit
 | Template subscriptions | A new websocket subscription per state change, never closed | One per template, closed on teardown |
 | Entity tracking | Scanned every entity in the state machine, string-matched the content | Uses the dependency list Home Assistant reports |
 | Shadow DOM | Copied every `<style>` from the document head into each card | Nothing copied; the shadow root stays isolated |
-| Config editor | Bundled Ace (~600 kB) | Home Assistant's own editor, with entity autocomplete |
+| Config editor | Bundled Ace (~600 kB) | Home Assistant's own editor, with entity autocomplete and HTML tag closing |
 | Interaction | `click`, `dblclick`, `change`, `input` | Adds `hold`, `contextmenu` and `moreInfo()` |
 | Bundle | 976 kB (290 kB gzipped) | **790 kB (163 kB gzipped)** |
-| Tests | none | 25 browser-driven assertions |
+| Tests | none | 39 browser-driven assertions |
 
 ### Why the subscription fix matters
 
