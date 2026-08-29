@@ -609,6 +609,38 @@ if (typing.error) {
   )
 }
 
+// --- `bare` strips Home Assistant's card chrome ---------------------------
+const bare = await page.evaluate(async () => {
+  const mount = async (config) => {
+    const card = document.createElement('tailwind-template-card')
+    document.getElementById('host').appendChild(card)
+    card.hass = window.__makeHass()
+    card.setConfig({ parse_jinja: true, ignore_line_breaks: true,
+                     content: '<div class="flex">x</div>', ...config })
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 50))
+      if (card.shadowRoot.querySelector('ha-card')) break
+    }
+    await new Promise((r) => setTimeout(r, 200))
+    const haCard = card.shadowRoot.querySelector('ha-card')
+    return haCard ? {
+      background: haCard.style.getPropertyValue('--ha-card-background'),
+      shadow: haCard.style.getPropertyValue('--ha-card-box-shadow'),
+      borderWidth: haCard.style.getPropertyValue('--ha-card-border-width'),
+      radius: haCard.style.getPropertyValue('--ha-card-border-radius')
+    } : null
+  }
+  return { on: await mount({ bare: true }), off: await mount({ bare: false }) }
+})
+
+check('bare: true makes ha-card transparent',
+  bare.on?.background === 'transparent' && bare.on?.shadow === 'none' &&
+  bare.on?.borderWidth === '0px' && bare.on?.radius === '0px',
+  JSON.stringify(bare.on))
+check('bare: false leaves ha-card untouched',
+  bare.off?.background === '' && bare.off?.shadow === '',
+  JSON.stringify(bare.off))
+
 check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
 
 await browser.close()

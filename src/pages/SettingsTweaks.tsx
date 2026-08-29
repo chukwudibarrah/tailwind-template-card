@@ -14,6 +14,7 @@ export const SettingsTweaks = () => {
           <TweakToggle label='Ignore line breaks' tweak='ignore_line_breaks' />
           <TweakToggle label='Always update' tweak='always_update' />
           <TweakToggle label='Parse Jinja templates' tweak='parse_jinja' />
+          <TweakToggle label='Bare card (no Home Assistant card background)' tweak='bare' />
           <TweakRangeInput
           // label='Debounce change period'
           // tweak='debounceChangePeriod'

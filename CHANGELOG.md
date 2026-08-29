@@ -9,6 +9,18 @@ this fork's; upstream's generated history is kept at the bottom for reference.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.0] - 2026-08-29
+
+### Added
+
+- `bare` option, removing Home Assistant's `ha-card` background, border, shadow
+  and radius so the card's own markup provides the whole surface. Content that
+  supplies its own panel previously sat on top of a stray coloured slab.
+  `plugins.daisyui.overrideCardBackground` only ever unset the background on the
+  wrapper inside `ha-card`, and card-mod cannot reach this card at all — it
+  injects a `<style>` into the shadow root, which the card clears on every
+  render.
+
 ## [4.1.2] - 2026-08-29
 
 ### Fixed
@@ -122,6 +134,7 @@ configurations and community examples keep working.
 - Classes introduced by bindings (`type: class`, or markup injected via
   `type: html`) are compiled, via a second pass over the rendered DOM.
 
+[4.2.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.2.0
 [4.1.2]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.2
 [4.1.1]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.1
 [4.1.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.0

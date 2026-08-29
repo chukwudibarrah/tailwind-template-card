@@ -76,6 +76,11 @@ export type ConfigState = {
   entity: string
   ignore_line_breaks: boolean
   always_update: boolean
+  /**
+   * Strip Home Assistant's `ha-card` chrome — background, border, shadow and
+   * radius — so the card's own markup provides the entire surface.
+   */
+  bare: boolean
   content: string
   entities: string[]
   parse_jinja: boolean

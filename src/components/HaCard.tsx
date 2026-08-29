@@ -10,6 +10,23 @@ export const FORWARDED_EVENTS = [
   'contextmenu'
 ] as const
 
+/**
+ * Neutralises `ha-card`'s own surface through the custom properties it reads,
+ * which is the supported way to restyle it.
+ *
+ * `overrideCardBackground` only unsets the inner wrapper's background, leaving
+ * Home Assistant's card still painted underneath — so content that supplies its
+ * own surface sat on top of a stray panel. card-mod cannot help here either:
+ * it injects a <style> element into the card's shadow root, and this card
+ * clears that root on every render.
+ */
+const BARE_CARD_STYLE = [
+  '--ha-card-background: transparent',
+  '--ha-card-box-shadow: none',
+  '--ha-card-border-width: 0px',
+  '--ha-card-border-radius: 0px'
+].join(';')
+
 /** How long a pointer must be held before a `hold` action fires. */
 const HOLD_DURATION_MS = 500
 /** Pointer travel beyond this cancels a hold (it's a scroll, not a press). */
@@ -123,7 +140,7 @@ export function HaCard ({
   return (
     <>
       {/* @ts-expect-error tag <ha-card> is not native */}
-      <ha-card>
+      <ha-card style={config.bare ? BARE_CARD_STYLE : undefined}>
         <div
           ref={containerRef}
           className={scheme}

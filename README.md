@@ -208,6 +208,7 @@ entities:
 | `parse_jinja` | `true` | Render `content` through Home Assistant's template engine. |
 | `ignore_line_breaks` | `true` | When `false`, newlines become `<br>`. |
 | `always_update` | `false` | Re-render on every state change. |
+| `bare` | `false` | Remove Home Assistant's card background, border, shadow and radius, so your markup provides the whole surface. |
 | `bindings` | `[]` | See [Bindings](#2-bindings--update-without-re-rendering). |
 | `actions` | `[]` | See [Actions](#3-actions--make-it-interactive). |
 | `plugins.daisyui.enabled` | `true` | Compile [daisyUI](https://daisyui.com) components into the card. |
@@ -235,6 +236,34 @@ mode, so tag handling is added on top:
   indents the caret.
 
 Everything else — brackets, quotes, undo — is CodeMirror's own behaviour.
+
+## Removing the Home Assistant card surface
+
+Every card renders inside Home Assistant's `<ha-card>`, which paints its own
+background, border, shadow and corner radius. When your content supplies its own
+surface — a rounded, blurred panel, say — that shows through as a stray coloured
+slab behind it.
+
+Set `bare: true` to remove it:
+
+```yaml
+type: custom:tailwind-template-card
+bare: true
+content: |
+  <div class="rounded-3xl bg-white/70 p-5 backdrop-blur-xl">…</div>
+```
+
+It works by setting the custom properties `ha-card` itself reads
+(`--ha-card-background`, `--ha-card-box-shadow`, `--ha-card-border-width`,
+`--ha-card-border-radius`), which is the supported way to restyle it.
+
+`plugins.daisyui.overrideCardBackground` is a different, narrower thing: it only
+unsets the background on the wrapper *inside* `ha-card`, and leaves Home
+Assistant's card surface painted underneath.
+
+> **card-mod does not work on this card.** It injects a `<style>` element into
+> the card's shadow root, and this card clears that root on every render, so the
+> styles are discarded. Use `bare` instead.
 
 ## Tailwind v4 notes
 
@@ -271,7 +300,7 @@ The one case not covered is a class applied by your own JavaScript at some arbit
 | Config editor | Bundled Ace (~600 kB) | Home Assistant's own editor, with entity autocomplete and HTML tag closing |
 | Interaction | `click`, `dblclick`, `change`, `input` | Adds `hold`, `contextmenu` and `moreInfo()` |
 | Bundle | 976 kB (290 kB gzipped) | **790 kB (163 kB gzipped)** |
-| Tests | none | 44 browser-driven assertions |
+| Tests | none | 46 browser-driven assertions |
 
 ### Why the subscription fix matters
 

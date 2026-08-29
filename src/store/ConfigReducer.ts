@@ -32,6 +32,7 @@ export const defaultConfigState: ConfigState = {
   content: '',
   ignore_line_breaks: true,
   always_update: false,
+  bare: false,
   parse_jinja: true,
   entities: [],
   bindings: [],
