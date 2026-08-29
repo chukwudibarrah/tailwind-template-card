@@ -186,13 +186,23 @@ export function HaCodeEditor ({
     // element and destroy the caret. External changes are handled below.
   }, [available, mode, linewrap, html])
 
-  // Adopt external changes (e.g. a different card loaded into the editor)
-  // without disturbing the caret while the user is typing.
+  /*
+   * Adopt genuinely external changes — a different card loaded into the same
+   * editor — but never while the user is typing.
+   *
+   * Config updates are debounced, so `defaultValue` always trails the
+   * keystrokes by at least the debounce period. Writing it back mid-edit
+   * discarded everything typed since and reset the caret to the start of the
+   * document, which showed up as characters vanishing and landing at the top.
+   * While focus is inside the editor, the editor owns its content.
+   */
   useEffect(() => {
     const editor = editorRef.current
-    if (editor && defaultValue !== undefined && editor.value !== defaultValue) {
-      editor.value = defaultValue
-    }
+    if (!editor || defaultValue === undefined) return
+    if (editor.value === defaultValue) return
+    if (editor.matches(':focus-within')) return
+
+    editor.value = defaultValue
   }, [defaultValue])
 
   if (!available) {

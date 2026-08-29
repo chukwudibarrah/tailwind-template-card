@@ -271,7 +271,7 @@ The one case not covered is a class applied by your own JavaScript at some arbit
 | Config editor | Bundled Ace (~600 kB) | Home Assistant's own editor, with entity autocomplete and HTML tag closing |
 | Interaction | `click`, `dblclick`, `change`, `input` | Adds `hold`, `contextmenu` and `moreInfo()` |
 | Bundle | 976 kB (290 kB gzipped) | **790 kB (163 kB gzipped)** |
-| Tests | none | 42 browser-driven assertions |
+| Tests | none | 44 browser-driven assertions |
 
 ### Why the subscription fix matters
 

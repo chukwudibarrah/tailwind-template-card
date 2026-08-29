@@ -264,7 +264,7 @@ const editor = await page.evaluate(async () => {
       // ha-code-editor only sets `display: block` on its host and lets
       // CodeMirror size itself, so with real content it is very tall.
       this.style.display = 'block'
-      this.innerHTML = '<div style="height:1200px"></div>'
+      this.innerHTML = '<div style="height:1200px"><input class="probe-input" /></div>'
     }
     set value(v) { lastAssignedValue = v; this._value = v }
     get value() { return this._value ?? '' }
@@ -543,6 +543,69 @@ if (layout.error) {
     'Bindings/Actions sit below the editor, not over it',
     layout.panelCount >= 2 && layout.firstPanelTop >= layout.wrapperBottom - 1,
     `panels=${layout.panelCount} firstTop=${Math.round(layout.firstPanelTop)} editorBottom=${Math.round(layout.wrapperBottom)}`
+  )
+}
+
+// --- Typing must not be clobbered by the debounced config echo ------------
+// Reproduces the reported glitch: characters typed while the debounced config
+// update is in flight were lost, and the caret jumped back to the start.
+const typing = await page.evaluate(async () => {
+  const el = document.createElement('tailwind-template-card-config')
+  document.getElementById('host').appendChild(el)
+  el.hass = window.__makeHass()
+  el.setConfig({ content: '<div class="', debounceChangePeriod: 100 })
+
+  let editor = null
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 50))
+    editor = el.shadowRoot.querySelector('ha-code-editor')
+    if (editor) break
+  }
+  if (!editor) return { error: 'editor never mounted' }
+  await new Promise((r) => setTimeout(r, 200))
+
+  // The user is in the editor.
+  editor.querySelector('.probe-input')?.focus()
+
+  const type = (text) => {
+    editor.value = text
+    editor.dispatchEvent(new CustomEvent('value-changed', {
+      bubbles: true, composed: true, detail: { value: text }
+    }))
+  }
+
+  // Type "ro" — this is what the debounced update will eventually carry.
+  type('<div class="ro')
+  // Keep typing before the debounce fires, exactly as a person would.
+  await new Promise((r) => setTimeout(r, 20))
+  editor.value = '<div class="rounded-3xl'
+
+  // Let the debounce land and the config echo back through props.
+  await new Promise((r) => setTimeout(r, 500))
+
+  const afterTyping = editor.value
+
+  // With focus elsewhere, an external config change should still be adopted —
+  // that is what this effect exists for.
+  editor.querySelector('.probe-input')?.blur()
+  el.setConfig({ content: '<p>loaded from elsewhere</p>', debounceChangePeriod: 100 })
+  await new Promise((r) => setTimeout(r, 400))
+
+  return { value: afterTyping, adopted: editor.value }
+})
+
+if (typing.error) {
+  check('typing test mounts', false, typing.error)
+} else {
+  check(
+    'keystrokes survive the debounced config round-trip',
+    typing.value === '<div class="rounded-3xl',
+    `editor value=${JSON.stringify(typing.value)}`
+  )
+  check(
+    'external config changes are still adopted when not focused',
+    typing.adopted === '<p>loaded from elsewhere</p>',
+    `editor value=${JSON.stringify(typing.adopted)}`
   )
 }
 
