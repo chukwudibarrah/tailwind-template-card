@@ -1,6 +1,141 @@
-# tailwindcss-template-card changelog
+# Changelog
 
-Changelog of tailwindcss-template-card.
+Notable changes to **tailwind-template-card**.
+
+This project is a fork of [usernein/tailwindcss-template-card](https://github.com/usernein/tailwindcss-template-card),
+whose last release was v3.1.1 in November 2023. Entries from v4.0.0 onwards are
+this fork's; upstream's generated history is kept at the bottom for reference.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
+this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [4.1.2] - 2026-08-29
+
+### Fixed
+
+- Typing in the config editor no longer loses characters or jumps the caret to
+  the start of the document. Config updates are debounced, so the `content`
+  prop always trails the keystrokes; the effect mirroring it back into the
+  editor fired with a stale value, replaced the whole document and reset the
+  caret. Typing a class produced `d<div class="ro">` from
+  `<div class="rounded-3xl">`. The editor now owns its content while focus is
+  inside it, and adopts the prop only when focus is elsewhere.
+
+## [4.1.1] - 2026-08-29
+
+### Changed
+
+- Closing a tag immediately before existing content now moves that content onto
+  its own line at the current indent, instead of leaving it butted against the
+  closing tag (`</div><div class=...`).
+
+## [4.1.0] - 2026-08-29
+
+### Added
+
+- HTML tag handling in the config editor, restoring what the old Ace editor did.
+  Typing `>` after an opening tag closes it and leaves the caret in the middle;
+  Enter between `>` and `</` opens the element out and indents the caret. Void
+  elements, self-closing tags and a `>` inside an attribute value are left to
+  CodeMirror. Home Assistant's editor ships only the `yaml` and `jinja2`
+  languages, so this is layered on the editor already loaded — transactions are
+  dispatched as plain objects, avoiding a second CodeMirror in the bundle.
+
+### Fixed
+
+- The Bindings and Actions panels no longer float over the code. `ha-code-editor`
+  styles its host with `display: block` only and lets CodeMirror size itself, so
+  with real content it grew past its container and painted over its siblings. The
+  editor is now capped and scrolls, with the panels in normal flow beneath it.
+- Removed the daisyUI `collapse` wrapper around the content editor; being
+  grid-based with `overflow: hidden` it fought the editor's height rather than
+  containing it.
+- Dropped `scrollbar-*` classes left behind by `tailwind-scrollbar`, which has no
+  Tailwind v4 build and had been inert since it was removed.
+
+### Changed
+
+- Workflow actions moved off the deprecated Node 20 runtime.
+
+## [4.0.1] - 2026-08-29
+
+### Fixed
+
+- Gradients, transforms, scale and shadow utilities rendered as nothing. Tailwind
+  v4 implements them with registered custom properties, and browsers ignore
+  `@property` when it arrives inside a shadow root's adopted stylesheets. Those
+  rules are now registered once on the document and shared across cards.
+- `npm ci` failed on a peer conflict between `eslint` and `@eslint/js`; local
+  installs had been using `--legacy-peer-deps` and never surfaced it.
+
+## [4.0.0] - 2026-08-29
+
+First release of the fork. The card type is unchanged in effect — the upstream
+`custom:tailwindcss-template-card` is registered as an alias, so existing
+configurations and community examples keep working.
+
+### Changed
+
+- **Renamed** to `tailwind-template-card`, so it is not mistaken for the
+  original.
+- **Replaced Twind with real Tailwind CSS v4**, compiled in the browser. Twind
+  was a Tailwind v3 reimplementation whose last npm publish was January 2023.
+  The stock `@tailwindcss/browser` build only scans `document` and never shadow
+  roots, so the card feeds candidates from the HTML it is about to render
+  straight to Tailwind's `compile()` API.
+- **daisyUI 5 is compiled in** as a Tailwind plugin and tree-shaken, replacing a
+  3.2 MB fetch from a public CDN on every dashboard load.
+- **The config editor uses Home Assistant's own `ha-code-editor`**, gaining entity
+  autocompletion and the active theme, and dropping ~600 kB of bundled Ace.
+- Replaced Headless UI's combobox — React-only, and its typings do not resolve
+  under Preact — with a native Preact entity picker.
+- Toolchain: Vite 4 to 8, TypeScript 5.9, ESLint 9 flat config,
+  `custom-card-helpers` 2.0. Dropped lodash, axios, postcss and 100+ other
+  packages. `preact/debug` no longer ships to production.
+- Bundle: 976 kB (290 kB gzipped) to 790 kB (163 kB gzipped).
+
+### Added
+
+- `moreInfo()` in action scope, opening Home Assistant's entity dialog
+  ([upstream #9](https://github.com/usernein/tailwindcss-template-card/issues/9)).
+- `hold` (a press of 500 ms or more, suppressing the click that follows) and
+  `contextmenu` action types.
+- A browser-driven test suite.
+
+### Fixed
+
+- **The `render_template` subscription leak**
+  ([upstream #11](https://github.com/usernein/tailwindcss-template-card/issues/11)).
+  Upstream re-subscribed on every state update and never unsubscribed, so
+  subscriptions accumulated for as long as a dashboard stayed open. There is now
+  one subscription per template, closed on teardown.
+- Entity tracking uses the dependency list Home Assistant reports for the
+  template, replacing a scan of the whole state machine that silently missed
+  entities used only in `actions`.
+- Cards no longer copy every `<style>` from the document head into their shadow
+  root, which duplicated Home Assistant's stylesheet per card and let its rules
+  fight the user's utility classes
+  ([upstream #6](https://github.com/usernein/tailwindcss-template-card/issues/6),
+  [#8](https://github.com/usernein/tailwindcss-template-card/issues/8)).
+- Action selectors match with `closest()`, so an action bound to a tile fires
+  when a child element is tapped.
+- Classes introduced by bindings (`type: class`, or markup injected via
+  `type: html`) are compiled, via a second pass over the rendered DOM.
+
+[4.1.2]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.2
+[4.1.1]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.1
+[4.1.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.0
+[4.0.1]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.0.1
+[4.0.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.0.0
+
+---
+
+# Upstream history
+
+Kept verbatim from `usernein/tailwindcss-template-card`. It was generated by
+`git-changelog-command-line` and stops at v2.1.0-1 — upstream never regenerated
+it for v2.2 through its final release, v3.1.1. For anything after v2.1.0-1, see
+[upstream's releases](https://github.com/usernein/tailwindcss-template-card/releases).
 
 ## v2.1.0-1 (2023-06-26)
 

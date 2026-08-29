@@ -277,6 +277,10 @@ The one case not covered is a class applied by your own JavaScript at some arbit
 
 Upstream re-subscribed to `render_template` on every state update and never unsubscribed, so subscriptions accumulated for as long as a dashboard stayed open ([upstream #11](https://github.com/usernein/tailwindcss-template-card/issues/11)). This fork opens one subscription per template and closes it on teardown — covered by a test that drives 25 state updates and asserts a single surviving subscription.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## Contributing
 
 Contributions are welcome — bug reports, examples, and pull requests alike.
