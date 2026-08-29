@@ -64,10 +64,11 @@ const attachHtmlEditing = (editor: HaCodeEditorElement) => {
     const before = doc.sliceString(Math.max(0, caret - 500), caret)
     const after = doc.sliceString(caret, Math.min(doc.length, caret + 2))
 
+    const indent = indentOf(doc.lineAt(caret).text)
     const edit =
       event.key === '>'
-        ? closeTagEdit(before)
-        : expandTagEdit(before, after, indentOf(doc.lineAt(caret).text))
+        ? closeTagEdit(before, after, indent)
+        : expandTagEdit(before, after, indent)
 
     if (!edit) return
 

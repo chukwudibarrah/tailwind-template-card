@@ -30,8 +30,16 @@ export type Edit = {
  * Closing a tag: typing `>` after `<div` yields `<div></div>` with the caret
  * between the two. Returns null when the `>` should be inserted normally —
  * void elements, self-closing tags, and anything that isn't an opening tag.
+ *
+ * When content follows the caret immediately, the closing tag would otherwise
+ * butt straight up against it (`</div><div class=...`), so the remainder is
+ * pushed onto its own line at the current indent.
  */
-export const closeTagEdit = (before: string): Edit | null => {
+export const closeTagEdit = (
+  before: string,
+  after = '',
+  lineIndent = ''
+): Edit | null => {
   if (before.endsWith('/')) return null
 
   const match = OPEN_TAG_AT_CARET.exec(before)
@@ -46,7 +54,13 @@ export const closeTagEdit = (before: string): Edit | null => {
   if ((attrs.match(/"/g) ?? []).length % 2 !== 0) return null
   if ((attrs.match(/'/g) ?? []).length % 2 !== 0) return null
 
-  return { insert: '></' + tag + '>', caret: 1 }
+  const closer = '></' + tag + '>'
+  const followedByContent = after.length > 0 && !/^\s/.test(after)
+
+  return {
+    insert: followedByContent ? closer + '\n' + lineIndent : closer,
+    caret: 1
+  }
 }
 
 /**

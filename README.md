@@ -228,7 +228,9 @@ mode, so tag handling is added on top:
 
 - Typing `>` after an opening tag closes it — `<div` becomes `<div></div>` with
   the caret in the middle. Void elements (`<br>`, `<img>`, …), self-closing tags
-  and a `>` inside an attribute value are left alone.
+  and a `>` inside an attribute value are left alone. If content follows the
+  caret it moves to its own line at the current indent, rather than being left
+  butted against the closing tag.
 - Pressing Enter between `>` and `</` opens the element out over three lines and
   indents the caret.
 
@@ -269,7 +271,7 @@ The one case not covered is a class applied by your own JavaScript at some arbit
 | Config editor | Bundled Ace (~600 kB) | Home Assistant's own editor, with entity autocomplete and HTML tag closing |
 | Interaction | `click`, `dblclick`, `change`, `input` | Adds `hold`, `contextmenu` and `moreInfo()` |
 | Bundle | 976 kB (290 kB gzipped) | **790 kB (163 kB gzipped)** |
-| Tests | none | 39 browser-driven assertions |
+| Tests | none | 42 browser-driven assertions |
 
 ### Why the subscription fix matters
 

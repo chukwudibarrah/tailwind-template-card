@@ -456,6 +456,9 @@ const tags = await page.evaluate(async () => {
 
   return {
     closeDiv: press('<div', 4, '>'),
+    beforeContent: press('<div<span>x</span>', 4, '>'),
+    beforeContentIndented: press('  <div<span>x</span>', 6, '>'),
+    beforeNewline: press('<div\n<span>x</span>', 4, '>'),
     voidTag: press('<img', 4, '>'),
     selfClosing: press('<br /', 5, '>'),
     insideAttr: press('<div class="a>b', 15, '>'),
@@ -470,6 +473,15 @@ if (tags.error) {
 } else {
   check('typing > closes the tag', tags.closeDiv.doc === '<div></div>' && tags.closeDiv.head === 5,
     `doc=${JSON.stringify(tags.closeDiv.doc)} caret=${tags.closeDiv.head}`)
+  check('closing tag pushes following content onto its own line',
+    tags.beforeContent.doc === '<div></div>\n<span>x</span>' && tags.beforeContent.head === 5,
+    `doc=${JSON.stringify(tags.beforeContent.doc)} caret=${tags.beforeContent.head}`)
+  check('pushed content keeps the current indent',
+    tags.beforeContentIndented.doc === '  <div></div>\n  <span>x</span>',
+    `doc=${JSON.stringify(tags.beforeContentIndented.doc)}`)
+  check('no extra line break when one already follows',
+    tags.beforeNewline.doc === '<div></div>\n<span>x</span>',
+    `doc=${JSON.stringify(tags.beforeNewline.doc)}`)
   check('void elements are not closed', !tags.voidTag.handled, `doc=${JSON.stringify(tags.voidTag.doc)}`)
   check('self-closing tags are left alone', !tags.selfClosing.handled, `doc=${JSON.stringify(tags.selfClosing.doc)}`)
   check('> inside an attribute value is literal', !tags.insideAttr.handled, `doc=${JSON.stringify(tags.insideAttr.doc)}`)
