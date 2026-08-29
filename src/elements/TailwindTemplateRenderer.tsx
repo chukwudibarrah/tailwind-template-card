@@ -5,7 +5,12 @@ import { fulfillWithDefaults } from '@store/ConfigReducer'
 import generatedCss from '@/src/index.css?inline'
 import { ConfigState } from '@types'
 import { CardEvents, dispatchCardEvent } from '@utils/events'
-import { TailwindEngine, extractCandidates } from '@/src/styles/TailwindEngine'
+import {
+  TailwindEngine,
+  extractCandidates,
+  ensureAtPropertiesRegistered,
+  splitAtProperties
+} from '@/src/styles/TailwindEngine'
 
 export abstract class TailwindTemplateRenderer extends HTMLElement {
   _hass: HomeAssistant | undefined
@@ -88,7 +93,13 @@ export abstract class TailwindTemplateRenderer extends HTMLElement {
 
     try {
       const css = await TailwindEngine.build(entryCss, candidates)
-      this._utilitySheet?.replaceSync(css)
+
+      // `@property` only takes effect at document scope, so those rules are
+      // hoisted out before the rest is adopted into the shadow root.
+      const { properties, rest } = splitAtProperties(css)
+      ensureAtPropertiesRegistered(properties)
+
+      this._utilitySheet?.replaceSync(rest)
     } catch (e) {
       console.error('failed to compile Tailwind styles', e)
     }

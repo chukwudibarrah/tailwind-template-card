@@ -333,6 +333,62 @@ check('legacy card type is still registered', legacy.defined)
 check('a config written for the upstream card still renders', legacy.rendered)
 check('legacy card is styled by the new engine', legacy.styled === 'flex', `display=${legacy.styled}`)
 
+// --- Utilities that depend on @property registration ----------------------
+// Tailwind v4 implements gradients, transforms and shadows with registered
+// custom properties. `@property` is ignored inside a shadow root, so these
+// render as nothing unless the rules are hoisted to the document.
+const registered = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  card.setConfig({
+    parse_jinja: true,
+    ignore_line_breaks: true,
+    content:
+      '<div id="grad" class="h-10 bg-linear-to-r from-emerald-400 to-emerald-600"></div>' +
+      '<div id="rot" class="rotate-45 scale-110 shadow-lg">x</div>'
+  })
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 50))
+    if (card.shadowRoot.querySelector('#grad')) break
+  }
+  await new Promise((r) => setTimeout(r, 400))
+
+  const grad = card.shadowRoot.querySelector('#grad')
+  const rot = card.shadowRoot.querySelector('#rot')
+  const rotStyle = rot ? getComputedStyle(rot) : null
+  return {
+    background: grad ? getComputedStyle(grad).backgroundImage : null,
+    // v4 emits the standalone `rotate`/`scale` properties, not `transform`.
+    rotate: rotStyle?.rotate ?? null,
+    // `scale-*` and `shadow-*` both resolve through registered properties.
+    scale: rotStyle?.scale ?? null,
+    boxShadow: rotStyle?.boxShadow ?? null
+  }
+})
+
+check(
+  'gradient utilities render (@property hoisted to document)',
+  /gradient/.test(registered.background || ''),
+  `background-image=${registered.background}`
+)
+check(
+  'rotate utility renders',
+  /45deg/.test(registered.rotate || ''),
+  `rotate=${registered.rotate}`
+)
+check(
+  'scale utility resolves its registered properties',
+  registered.scale && registered.scale !== 'none',
+  `scale=${registered.scale}`
+)
+check(
+  'shadow utility resolves its registered properties',
+  registered.boxShadow && registered.boxShadow !== 'none',
+  `box-shadow=${registered.boxShadow}`
+)
+
 check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
 
 await browser.close()

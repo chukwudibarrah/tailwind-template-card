@@ -2,6 +2,8 @@
 
 A Home Assistant dashboard card that renders HTML styled with Tailwind CSS, with full access to your entities through Jinja templates.
 
+![Example cards built with the Tailwind Template Card](images/cards.png)
+
 ```yaml
 type: custom:tailwind-template-card
 content: |
@@ -221,6 +223,11 @@ This card runs **real Tailwind CSS v4**, so v4 syntax works: `size-*`, `text-bal
 
 Classes are compiled from what the card is about to render, in two passes: the rendered HTML, then the live DOM once bindings have been applied.
 
+Tailwind v4 implements gradients, transforms and shadows with registered custom
+properties (`@property`). Browsers ignore `@property` when it arrives inside a
+shadow root, so the card hoists those rules to the document — without that,
+`bg-linear-*`, `scale-*` and `shadow-*` silently render as nothing.
+
 Jinja is resolved by Home Assistant *before* the card sees the markup, so interpolated class names are already concrete and work fine:
 
 ```jinja
@@ -275,6 +282,10 @@ npm run build   # production bundle into dist/
 `npm test` drives a real browser through Playwright. It uses your installed Chrome if there is one, otherwise Playwright's bundled Chromium (`npx playwright install chromium`).
 
 Before opening a pull request, please make sure `npm run lint` and `npm test` both pass, and add a test for any behaviour you change — the suite in [`test/run.mjs`](test/run.mjs) is plain JavaScript and easy to extend.
+
+**Regenerating the README screenshot.** `npm run build && node scripts/screenshot.mjs`
+renders demo cards with the real bundle and writes `images/cards.png`, so the
+image always reflects what the card actually produces.
 
 **Testing against a real Home Assistant.** Run `npm run build`, copy `dist/tailwind-template-card.js` into `config/www/`, and register it as a dashboard resource (see [Manually](#manually)). A hard refresh picks up rebuilds.
 

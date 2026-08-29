@@ -58,6 +58,45 @@ export const extractCandidates = (html: string): string[] => {
   return [...found]
 }
 
+/**
+ * `@property` rules are registered per document, and a browser ignores them
+ * entirely when they arrive inside a shadow root's adopted stylesheets. Tailwind
+ * v4 leans on registered custom properties for gradients, transforms, shadows
+ * and filters, so those utilities silently render as nothing unless the rules
+ * are hoisted to the document.
+ *
+ * Verified in Chrome: a gradient defined against a shadow-scoped `@property`
+ * computes to `none`; the same rule adopted on `document` resolves correctly.
+ */
+const AT_PROPERTY_RULE = /@property\s+--[\w-]+\s*\{[^}]*\}/g
+
+export const splitAtProperties = (css: string) => {
+  const properties = css.match(AT_PROPERTY_RULE) ?? []
+  return { properties, rest: css.replace(AT_PROPERTY_RULE, '') }
+}
+
+/** Document-level sheet holding every `@property` rule any card has needed. */
+let propertySheet: CSSStyleSheet | null = null
+const registeredProperties = new Set<string>()
+
+/**
+ * Registers `@property` rules on the document, once each. Shared across every
+ * card instance, since custom property registration is global anyway.
+ */
+export const ensureAtPropertiesRegistered = (rules: string[]) => {
+  const unseen = rules.filter(rule => !registeredProperties.has(rule))
+  if (unseen.length === 0) return
+
+  unseen.forEach(rule => registeredProperties.add(rule))
+
+  if (!propertySheet) {
+    propertySheet = new CSSStyleSheet()
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, propertySheet]
+  }
+
+  propertySheet.replaceSync([...registeredProperties].join('\n'))
+}
+
 type CacheEntry = {
   compiler: Compiler
   candidates: Set<string>
