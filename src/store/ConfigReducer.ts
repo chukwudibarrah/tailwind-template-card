@@ -6,9 +6,10 @@ import {
 import {
   CardEvents,
   dispatchCardEvent,
-  registerCardEventHandler
+  registerCardEventHandler,
+  unregisterCardEventHandler
 } from '@utils/events'
-import { useReducer } from 'preact/hooks'
+import { useCallback, useEffect, useReducer } from 'preact/hooks'
 
 export const ConfigReducer = (
   state: ConfigState,
@@ -67,22 +68,37 @@ export const initialConfigState: ConfigState = {
 export const useConfigReducer = () => {
   const [state, dispatch] = useReducer(ConfigReducer, initialConfigState)
 
-  const updateConfig = (
-    config: Partial<ConfigState>,
-    dispatch_event: boolean = true
-  ) => {
-    dispatch({
-      action_type: ConfigActionTypes.SET_CONFIG,
-      dispatch_event,
-      payload: config
-    })
-  }
+  const updateConfig = useCallback(
+    (config: Partial<ConfigState>, dispatch_event: boolean = true) => {
+      dispatch({
+        action_type: ConfigActionTypes.SET_CONFIG,
+        dispatch_event,
+        payload: config
+      })
+    },
+    []
+  )
 
-  registerCardEventHandler(CardEvents.CONFIG_RECEIVED, (e: Event) => {
-    const config = (e as CustomEvent).detail.config as ConfigState
-    const filledConfig = fulfillWithDefaults(config)
-    updateConfig(filledConfig, false)
-  })
+  /*
+   * Registered once, and removed on unmount.
+   *
+   * This previously ran on every render against `document`, with no cleanup, so
+   * each render added another listener. Home Assistant answers `config-changed`
+   * by calling `setConfig` straight back, which fires CONFIG_RECEIVED — every
+   * accumulated listener then dispatched an update, causing another render and
+   * another listener. The editor degraded with each keystroke until the page
+   * was reloaded.
+   */
+  useEffect(() => {
+    const onConfigReceived = (e: Event) => {
+      const config = (e as CustomEvent).detail.config as ConfigState
+      updateConfig(fulfillWithDefaults(config), false)
+    }
+
+    registerCardEventHandler(CardEvents.CONFIG_RECEIVED, onConfigReceived)
+    return () =>
+      unregisterCardEventHandler(CardEvents.CONFIG_RECEIVED, onConfigReceived)
+  }, [updateConfig])
 
   return {
     config: state,

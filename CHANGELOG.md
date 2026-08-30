@@ -9,6 +9,24 @@ this fork's; upstream's generated history is kept at the bottom for reference.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.2.1] - 2026-08-30
+
+### Fixed
+
+- The configuration editor degraded the longer it was used, eventually needing a
+  page reload. Three compounding leaks:
+  - `useConfigReducer` registered its `CONFIG_RECEIVED` listener on `document`
+    on every render with no cleanup. Home Assistant answers `config-changed` by
+    calling `setConfig` straight back, which fires that event — so every
+    accumulated listener dispatched an update, causing another render and
+    another listener. Seven listeners existed before a key was pressed.
+  - Removing the editor never unmounted its Preact tree, so effect cleanup never
+    ran and each editing session left its listener behind permanently.
+  - The editor element registered a `document` listener in its constructor,
+    which outlived the element entirely.
+- `useDebouncer` built a new handler on every render, leaving `timeoutPointer`
+  null so the pending timer was never cancelled and nothing was debounced.
+
 ## [4.2.0] - 2026-08-29
 
 ### Added
@@ -134,6 +152,7 @@ configurations and community examples keep working.
 - Classes introduced by bindings (`type: class`, or markup injected via
   `type: html`) are compiled, via a second pass over the rendered DOM.
 
+[4.2.1]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.2.1
 [4.2.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.2.0
 [4.1.2]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.2
 [4.1.1]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.1

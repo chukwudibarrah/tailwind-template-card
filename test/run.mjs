@@ -641,6 +641,122 @@ check('bare: false leaves ha-card untouched',
   bare.off?.background === '' && bare.off?.shadow === '',
   JSON.stringify(bare.off))
 
+// --- Config editor must not leak listeners or skip debouncing -------------
+// Home Assistant closes the loop: it listens for `config-changed` from the
+// config element and calls `setConfig` straight back. Without that round-trip
+// wired up, the failure does not appear at all.
+const leak = await page.evaluate(async () => {
+  const counts = { received: 0 }
+  const realAdd = document.addEventListener.bind(document)
+  document.addEventListener = (type, ...rest) => {
+    if (type === 'tailwind-template-card-config-received') counts.received++
+    return realAdd(type, ...rest)
+  }
+
+  let changedEvents = 0
+  const el = document.createElement('tailwind-template-card-config')
+  document.getElementById('host').appendChild(el)
+
+  // This is what Home Assistant does with the event the card emits.
+  el.addEventListener('config-changed', (e) => {
+    changedEvents++
+    el.setConfig(e.detail.config)
+  })
+
+  el.hass = window.__makeHass()
+  el.setConfig({ content: 'x', debounceChangePeriod: 100 })
+
+  let editor = null
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 50))
+    editor = el.shadowRoot.querySelector('ha-code-editor')
+    if (editor) break
+  }
+  await new Promise((r) => setTimeout(r, 200))
+  const afterMount = counts.received
+
+  editor.querySelector('.probe-input')?.focus()
+  for (let i = 0; i < 10; i++) {
+    const text = 'x'.repeat(i + 2)
+    editor.value = text
+    editor.dispatchEvent(new CustomEvent('value-changed', {
+      bubbles: true, composed: true, detail: { value: text }
+    }))
+    await new Promise((r) => setTimeout(r, 15))
+  }
+  await new Promise((r) => setTimeout(r, 800))
+
+  document.addEventListener = realAdd
+  return { afterMount, afterTyping: counts.received, changedEvents }
+})
+
+console.log(`  [data] CONFIG_RECEIVED listeners: ${leak.afterMount} at mount -> ${leak.afterTyping} after 10 keystrokes`)
+console.log(`  [data] config-changed round-trips: ${leak.changedEvents}`)
+
+check(
+  'config listeners do not accumulate while typing',
+  leak.afterTyping - leak.afterMount <= 1,
+  `mount=${leak.afterMount} after=${leak.afterTyping}`
+)
+check(
+  'rapid keystrokes are debounced into few config updates',
+  leak.changedEvents <= 3,
+  `${leak.changedEvents} round-trips for 10 keystrokes`
+)
+
+// --- Opening the editor repeatedly must not accumulate listeners ----------
+// The reported symptom was that the editor degraded "after using it for a
+// while" and needed a page reload, which is what a per-session leak looks like.
+const sessions = await page.evaluate(async () => {
+  const counts = { received: 0, changed: 0 }
+  const realAdd = document.addEventListener.bind(document)
+  const realRemove = document.removeEventListener.bind(document)
+  document.addEventListener = (type, ...rest) => {
+    if (type === 'tailwind-template-card-config-received') counts.received++
+    if (type === 'tailwind-template-card-config-changed') counts.changed++
+    return realAdd(type, ...rest)
+  }
+  document.removeEventListener = (type, ...rest) => {
+    if (type === 'tailwind-template-card-config-received') counts.received--
+    if (type === 'tailwind-template-card-config-changed') counts.changed--
+    return realRemove(type, ...rest)
+  }
+
+  const openClose = async () => {
+    const el = document.createElement('tailwind-template-card-config')
+    document.getElementById('host').appendChild(el)
+    el.addEventListener('config-changed', (e) => el.setConfig(e.detail.config))
+    el.hass = window.__makeHass()
+    el.setConfig({ content: '<div>x</div>', debounceChangePeriod: 100 })
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 50))
+      if (el.shadowRoot.querySelector('ha-code-editor')) break
+    }
+    await new Promise((r) => setTimeout(r, 150))
+    el.remove()
+    await new Promise((r) => setTimeout(r, 150))
+  }
+
+  await openClose()
+  const afterOne = { ...counts }
+  for (let i = 0; i < 5; i++) await openClose()
+  const afterSix = { ...counts }
+
+  document.addEventListener = realAdd
+  document.removeEventListener = realRemove
+  return { afterOne, afterSix }
+})
+
+console.log(`  [data] live listeners after 1 session:  received=${sessions.afterOne.received} changed=${sessions.afterOne.changed}`)
+console.log(`  [data] live listeners after 6 sessions: received=${sessions.afterSix.received} changed=${sessions.afterSix.changed}`)
+
+check(
+  'closing the editor releases its listeners',
+  sessions.afterSix.received <= sessions.afterOne.received &&
+  sessions.afterSix.changed <= sessions.afterOne.changed,
+  `1 session -> ${JSON.stringify(sessions.afterOne)}, 6 sessions -> ${JSON.stringify(sessions.afterSix)}`
+)
+
 check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
 
 await browser.close()

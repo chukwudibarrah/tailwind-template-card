@@ -22,3 +22,10 @@ export const registerCardEventHandler = (
 ) => {
   document.addEventListener(event, callback)
 }
+
+export const unregisterCardEventHandler = (
+  event: CardEvents,
+  callback: Parameters<typeof document.removeEventListener>[1]
+) => {
+  document.removeEventListener(event, callback)
+}
