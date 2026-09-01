@@ -9,6 +9,50 @@ this fork's; upstream's generated history is kept at the bottom for reference.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.0] - 2026-09-01
+
+### Changed
+
+- Rebuilt the Bindings and Actions panels. They were a fixed-height grid that
+  flowed into columns: every rule got an ~85px track while its own contents
+  needed at least 136px, so rows painted over each other (measured: 277px of
+  content in a 157px box, with `overflow: visible`), and a fourth rule started a
+  column reachable only by scrolling sideways. Only one rule could be open at a
+  time, and its delete button appeared on hover — unreachable on a tablet.
+
+  Rules are now a full-width vertical list, expanded independently, collapsed by
+  default so no code editor is mounted for a rule nobody is editing. Delete is
+  always visible. Each collapsed row shows its event and selector, and the
+  selector is a plain single-line input rather than a 128px code editor.
+
+### Added
+
+- **Suggested actions.** The Actions panel scans `content` and offers a
+  one-click action for each `data-*` attribute no action handles, prefilled for
+  the known conventions (`data-toggle`, `data-more`, `data-media`,
+  `data-climate`). Attributes that existing code already reads are treated as
+  arguments, not triggers, and are not offered.
+- Selector fields autocomplete from the `data-*` attributes and ids in the
+  card's own markup, and report how many elements a selector matches.
+- Rules the card will skip are marked "won't run", with the panel header
+  counting them.
+- `hold` and `contextmenu` in the event list. Both have always worked at
+  runtime; neither was reachable without hand-editing YAML.
+
+### Fixed
+
+- An action's event was an uncontrolled `<select>`, so an action stored with no
+  type displayed "click" while the card skipped it entirely — configured to the
+  eye, dead in practice. Both type controls are now controlled, and an unset
+  type reads as unset.
+- The binding type is an input with suggestions rather than a five-item select.
+  The card has always applied any other value as an attribute of that name; the
+  editor could not express it.
+
+### Removed
+
+- Dead config components (`ConfigInput`, `FloatingTextarea`, `InputCodeEditor`).
+
 ## [4.2.1] - 2026-08-30
 
 ### Fixed

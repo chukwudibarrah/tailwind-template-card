@@ -237,6 +237,38 @@ mode, so tag handling is added on top:
 
 Everything else — brackets, quotes, undo — is CodeMirror's own behaviour.
 
+### Bindings and Actions panels
+
+Both panels are a plain vertical list: one row per rule, full width, each row
+expanded independently. Rows are collapsed by default and mount no editor until
+opened, so a card with a dozen actions costs a dozen headers rather than a dozen
+CodeMirror instances.
+
+A rule the card will skip — one missing a selector, a type or its code — is
+marked **won't run** in the collapsed row, and the panel header counts how many
+are incomplete. The card has always ignored those silently, which is how a
+button ends up rendering, colouring itself from state, responding to taps and
+doing nothing.
+
+**Suggested actions.** The Actions panel reads the markup in `content` and
+offers a one-click action for every `data-*` attribute nothing currently
+handles. Known conventions are filled in completely:
+
+| Attribute | Event | Call |
+| --- | --- | --- |
+| `data-toggle="light.x"` | `click` | `hass.callService('homeassistant', 'toggle', { entity_id: this.dataset.toggle })` |
+| `data-more="light.x"` | `hold` | `moreInfo(this.dataset.more)` |
+| `data-media="media_play_pause"` | `click` | `hass.callService('media_player', this.dataset.media, { entity_id: this.dataset.player })` |
+| `data-climate="up"` | `click` | Steps the target temperature by 0.5° |
+
+Anything else gets its selector and `click` filled in, and leaves the code to
+you. Attributes that existing code already reads — `data-player` alongside
+`data-media`, say — are arguments to an action rather than triggers for one, so
+they are not offered.
+
+The selector fields autocomplete from the same scan: every `data-*` attribute
+and `id` in your markup, annotated with the entity it points at.
+
 ## Removing the Home Assistant card surface
 
 Every card renders inside Home Assistant's `<ha-card>`, which paints its own

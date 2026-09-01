@@ -1,18 +1,31 @@
 import clsx from 'clsx'
 import { HaCodeEditor } from '@components/HaCodeEditor'
 
+/**
+ * `default` is the card's HTML content; `compact` is a short snippet such as
+ * the code a binding or action runs. The height is chosen here rather than
+ * passed as a class because two `min-h-*` utilities in one class attribute
+ * resolve by their order in the compiled stylesheet, not by the order written.
+ */
+const HEIGHTS = {
+  default: 'min-h-32 max-h-[420px]',
+  compact: 'min-h-24 max-h-64'
+} as const
+
 export function CodeEditor ({
   defaultValue,
   onChange,
   className,
   mode = 'jinja2',
-  html = true
+  html = true,
+  size = 'default'
 }: {
   defaultValue: string
   onChange: (defaultValue: string) => void
   className?: string
   mode?: string
   html?: boolean
+  size?: keyof typeof HEIGHTS
 }) {
   return (
     /*
@@ -28,7 +41,8 @@ export function CodeEditor ({
       mode={mode}
       html={html}
       className={clsx(
-        'w-full min-h-32 max-h-[420px] overflow-auto rounded-lg',
+        'w-full overflow-auto rounded-lg',
+        HEIGHTS[size],
         className
       )}
     />

@@ -514,8 +514,8 @@ const layout = await page.evaluate(async () => {
   const wrapperBox = wrapper.getBoundingClientRect()
   const overflowY = getComputedStyle(wrapper).overflowY
 
-  // The Bindings / Actions panels are the collapse blocks after the editor.
-  const panels = [...el.shadowRoot.querySelectorAll('.collapse')]
+  // The Bindings / Actions panels sit after the editor.
+  const panels = [...el.shadowRoot.querySelectorAll('[data-panel]')]
   const panelTops = panels.map((p) => p.getBoundingClientRect().top)
 
   return {
@@ -755,6 +755,198 @@ check(
   sessions.afterSix.received <= sessions.afterOne.received &&
   sessions.afterSix.changed <= sessions.afterOne.changed,
   `1 session -> ${JSON.stringify(sessions.afterOne)}, 6 sessions -> ${JSON.stringify(sessions.afterSix)}`
+)
+
+// --- Bindings / Actions panels ---------------------------------------------
+// The panels used to be a fixed-height, column-flowing grid: every row got an
+// ~85px track while its own contents needed at least 136px, so rows painted
+// over each other, and a fourth rule started a column reachable only by
+// scrolling sideways.
+const MARKUP = [
+  '<div class="flex">',
+  '  <button data-toggle="fan.cooling_fan" data-more="fan.cooling_fan">Fan</button>',
+  '  <button data-media="media_play_pause" data-player="media_player.study">Play</button>',
+  '  <span id="clock">12:00</span>',
+  '</div>'
+].join('\n')
+
+const panels = await page.evaluate(async (content) => {
+  const el = document.createElement('tailwind-template-card-config')
+  el.style.display = 'block'
+  el.style.width = '760px'
+  document.getElementById('host').appendChild(el)
+  el.hass = window.__makeHass()
+  el.addEventListener('config-changed', (e) => el.setConfig(e.detail.config))
+  el.setConfig({
+    content,
+    // A type the user never chose: the old uncontrolled select showed "click"
+    // for this, so the action looked configured and was silently skipped.
+    actions: [
+      { selector: '[data-toggle]', type: '', call: 'moreInfo("fan.cooling_fan")' },
+      { selector: '[data-more]', type: 'hold', call: 'moreInfo(this.dataset.more)' },
+      { selector: '[data-media]', type: 'click', call: "hass.callService('media_player', this.dataset.media, { entity_id: this.dataset.player })" }
+    ],
+    bindings: [{ selector: '.temp', type: 'text', bind: 'return state' }]
+  })
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 50))
+    if (el.shadowRoot.querySelector('[data-rule]')) break
+  }
+  await new Promise((r) => setTimeout(r, 400))
+
+  const actions = el.shadowRoot.querySelector('[data-panel="actions"]')
+  if (!actions) return { error: 'actions panel never rendered' }
+
+  const rows = [...actions.querySelectorAll('[data-rule]')]
+  const measure = (node) => {
+    const box = node.getBoundingClientRect()
+    return {
+      top: Math.round(box.top),
+      bottom: Math.round(box.bottom),
+      left: Math.round(box.left),
+      right: Math.round(box.right),
+      // The old row was a fixed grid track: 277px of content in a 157px box,
+      // with `overflow: visible`, so it painted over the row below.
+      spill: node.scrollHeight - node.clientHeight
+    }
+  }
+
+  // Expand every row: the worst case for the old layout was an open row.
+  rows.forEach((row) => row.querySelector('button[aria-expanded]').click())
+  await new Promise((r) => setTimeout(r, 400))
+
+  const boxes = [...actions.querySelectorAll('[data-rule]')].map(measure)
+  let overlaps = 0
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]
+      const b = boxes[j]
+      if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) overlaps++
+    }
+  }
+
+  const first = actions.querySelector('[data-rule]')
+  const select = first.querySelector('select')
+  const chips = [...actions.querySelectorAll('.btn-xs')].map((b) =>
+    b.textContent.trim()
+  )
+  const listId = first.querySelector('input[list]')?.getAttribute('list')
+  const options = listId
+    ? [...el.shadowRoot.querySelectorAll(`#${listId} option`)].map((o) => o.value)
+    : []
+
+  return {
+    rowCount: boxes.length,
+    overlaps,
+    maxSpill: Math.max(...boxes.map((b) => b.spill)),
+    hScroll: actions.scrollWidth > actions.clientWidth + 1,
+    fullWidth: boxes.every((b) => b.right - b.left > 400),
+    selectValue: select.value,
+    incomplete: first.getAttribute('data-incomplete'),
+    warns: /won/i.test(first.textContent),
+    chips,
+    options,
+    // Collapsed rows must not mount an editor of their own.
+    editorsWhenOpen: actions.querySelectorAll('ha-code-editor, textarea').length,
+    el: (window.__panelEl = el) && true
+  }
+}, MARKUP)
+
+if (panels.error) {
+  check('bindings/actions panels render', false, panels.error)
+} else {
+  check('every rule row is visible at once', panels.rowCount === 3, `rows=${panels.rowCount}`)
+  check('expanded rows do not overlap each other', panels.overlaps === 0, `overlaps=${panels.overlaps}`)
+  check(
+    'a row is as tall as its contents',
+    panels.maxSpill <= 1,
+    `content overflows row by ${panels.maxSpill}px`
+  )
+  check('panels never scroll sideways', !panels.hScroll)
+  check('rows use the full panel width', panels.fullWidth)
+  check(
+    'an unset event reads as unset, not as "click"',
+    panels.selectValue === '',
+    `select=${JSON.stringify(panels.selectValue)}`
+  )
+  check(
+    'an action that cannot run is flagged',
+    panels.incomplete === 'true' && panels.warns,
+    `data-incomplete=${panels.incomplete} warns=${panels.warns}`
+  )
+  check(
+    'selector autocomplete is built from the markup',
+    ['[data-toggle]', '[data-more]', '[data-media]', '#clock'].every((s) =>
+      panels.options.includes(s)
+    ),
+    `options=${panels.options.join(' ')}`
+  )
+}
+
+// --- Suggested actions ------------------------------------------------------
+// Markup carrying a data attribute that no action answers is the failure this
+// surfaces: the control renders, colours itself from state, and does nothing.
+const suggested = await page.evaluate(async (content) => {
+  const el = document.createElement('tailwind-template-card-config')
+  document.getElementById('host').appendChild(el)
+  el.hass = window.__makeHass()
+
+  let latest = null
+  el.addEventListener('config-changed', (e) => {
+    latest = e.detail.config
+    el.setConfig(e.detail.config)
+  })
+  el.setConfig({ content, actions: [], bindings: [] })
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 50))
+    if (el.shadowRoot.querySelector('[data-panel="actions"] .btn-xs')) break
+  }
+  await new Promise((r) => setTimeout(r, 300))
+
+  const actions = el.shadowRoot.querySelector('[data-panel="actions"]')
+  const chips = [...actions.querySelectorAll('.btn-xs')]
+  const labels = chips.map((c) => c.textContent.trim())
+
+  const toggle = chips.find((c) => c.textContent.includes('data-toggle'))
+  toggle?.click()
+  await new Promise((r) => setTimeout(r, 300))
+
+  return {
+    labels,
+    added: latest?.actions ?? [],
+    // Adding it should retire its own chip.
+    remaining: [...actions.querySelectorAll('.btn-xs')].map((c) =>
+      c.textContent.trim()
+    )
+  }
+}, MARKUP)
+
+check(
+  'unhandled data attributes are offered as actions',
+  ['data-toggle', 'data-more', 'data-media'].every((a) =>
+    suggested.labels.some((l) => l.includes(a))
+  ),
+  `chips=${suggested.labels.join(' | ')}`
+)
+check(
+  'attributes an action reads are not offered as triggers',
+  !suggested.labels.some((l) => l.includes('data-player')),
+  `chips=${suggested.labels.join(' | ')}`
+)
+check(
+  'accepting a suggestion writes a complete action',
+  suggested.added.length === 1 &&
+    suggested.added[0].selector === '[data-toggle]' &&
+    suggested.added[0].type === 'click' &&
+    suggested.added[0].call.includes('dataset.toggle'),
+  JSON.stringify(suggested.added)
+)
+check(
+  'an accepted suggestion stops being offered',
+  !suggested.remaining.some((l) => l.includes('data-toggle')),
+  `chips=${suggested.remaining.join(' | ')}`
 )
 
 check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
