@@ -1,5 +1,7 @@
 import { ConfigState } from '@types'
+import type { RefObject } from 'preact'
 import { useCallback, useEffect, useRef } from 'preact/hooks'
+import { FOLLOW_HA_THEME } from '@store/configDefaults'
 
 /** Native events forwarded to the card's action handler. */
 export const FORWARDED_EVENTS = [
@@ -27,28 +29,66 @@ const BARE_CARD_STYLE = [
   '--ha-card-border-radius: 0px'
 ].join(';')
 
+/**
+ * Elements that already turn Enter/Space into a click, or need those keys for
+ * typing. Keyboard activation is only synthesised for everything else.
+ */
+const NATIVE_KEYBOARD =
+  'button, a[href], input, select, textarea, summary, [contenteditable=""], [contenteditable="true"]'
+
+/** Opted-in custom controls: `<div role="button" tabindex="0">`. */
+const KEYBOARD_ACTIVATABLE = '[role="button"], [tabindex]'
+
+/**
+ * `data-theme` and scheme class for the content, from the configured theme.
+ *
+ * `auto` follows Home Assistant's own light/dark mode. It used to default to a
+ * fixed `dark - dark`, so daisyUI components painted dark on a light dashboard.
+ */
+export const resolveTheme = (theme: string | undefined, darkMode: boolean) => {
+  const value = theme ?? FOLLOW_HA_THEME
+  if (value === FOLLOW_HA_THEME) {
+    const scheme = darkMode ? 'dark' : 'light'
+    return { scheme, attributes: { 'data-theme': scheme } }
+  }
+  if (value === 'inherit' || value === 'inherit - inherit') {
+    return { scheme: 'inherit', attributes: {} }
+  }
+  const [scheme, themeName] = value.split(' - ')
+  return { scheme, attributes: { 'data-theme': themeName ?? scheme } }
+}
+
 /** How long a pointer must be held before a `hold` action fires. */
 const HOLD_DURATION_MS = 500
 /** Pointer travel beyond this cancels a hold (it's a scroll, not a press). */
 const HOLD_MOVE_TOLERANCE_PX = 10
 
+/**
+ * The card's persistent shell: `ha-card` and the content container.
+ *
+ * The content itself is not rendered here. The card morphs it into
+ * `contentRef` so that an update changes only what changed — a full re-render
+ * dropped focus, reset a slider mid-drag and made CSS transitions impossible.
+ */
 export function HaCard ({
-  htmlContent,
   config,
+  darkMode,
+  error,
+  contentRef,
   onEvent
 }: {
-  htmlContent: string
   config: ConfigState
+  darkMode: boolean
+  /** Template error to show above the last good render. */
+  error: string | null
+  contentRef: RefObject<HTMLDivElement>
   onEvent: (e: Event) => void
 }) {
-  const theme = config.plugins.daisyui.theme ?? 'inherit - inherit'
-  const [scheme, themeName] = theme.split(' - ')
-  const attributes = ['inherit', 'auto', 'inherit - inherit'].includes(theme)
-    ? {}
-    : { 'data-theme': themeName }
+  const { scheme, attributes } = resolveTheme(
+    config.plugins.daisyui.theme,
+    darkMode
+  )
   const unsetBackgroundStyles = { background: 'unset', color: 'unset' }
-
-  const containerRef = useRef<HTMLDivElement | null>(null)
 
   // Keep the latest handler without re-binding listeners on every render.
   const handlerRef = useRef(onEvent)
@@ -57,7 +97,7 @@ export function HaCard ({
   const dispatch = useCallback((e: Event) => handlerRef.current(e), [])
 
   useEffect(() => {
-    const container = containerRef.current
+    const container = contentRef.current
     if (!container) return
 
     FORWARDED_EVENTS.forEach((type) =>
@@ -115,6 +155,20 @@ export function HaCard ({
       e.preventDefault()
     }
 
+    // Custom controls opted in with `role="button"` or `tabindex` answer
+    // Enter and Space the way a native button would.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return
+      if (e.defaultPrevented || e.repeat) return
+      const target = e.target
+      if (!(target instanceof HTMLElement)) return
+      if (target.matches(NATIVE_KEYBOARD)) return
+      if (!target.matches(KEYBOARD_ACTIVATABLE)) return
+      e.preventDefault()
+      target.click()
+    }
+
+    container.addEventListener('keydown', onKeyDown)
     container.addEventListener('hold', dispatch, true)
     container.addEventListener('pointerdown', onPointerDown, true)
     container.addEventListener('pointermove', onPointerMove, true)
@@ -128,6 +182,7 @@ export function HaCard ({
       FORWARDED_EVENTS.forEach((type) =>
         container.removeEventListener(type, dispatch, true)
       )
+      container.removeEventListener('keydown', onKeyDown)
       container.removeEventListener('hold', dispatch, true)
       container.removeEventListener('pointerdown', onPointerDown, true)
       container.removeEventListener('pointermove', onPointerMove, true)
@@ -135,14 +190,22 @@ export function HaCard ({
       container.removeEventListener('pointercancel', onPointerUp, true)
       container.removeEventListener('click', onClickCapture, true)
     }
-  }, [dispatch])
+  }, [dispatch, contentRef])
 
   return (
     <>
       {/* @ts-expect-error tag <ha-card> is not native */}
       <ha-card style={config.bare ? BARE_CARD_STYLE : undefined}>
+        {error && (
+          // @ts-expect-error <ha-alert> is not native
+          <ha-alert key='error' alert-type='error' style='display: block'>
+            {error}
+            {/* @ts-expect-error <ha-alert> is not native */}
+          </ha-alert>
+        )}
         <div
-          ref={containerRef}
+          key='content'
+          ref={contentRef}
           className={scheme}
           style={
             config.plugins.daisyui.overrideCardBackground
@@ -150,7 +213,6 @@ export function HaCard ({
               : unsetBackgroundStyles
           }
           {...attributes}
-          dangerouslySetInnerHTML={{ __html: htmlContent }}
         />
         {/* @ts-expect-error <ha-card> is not native */}
       </ha-card>

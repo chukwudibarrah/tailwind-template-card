@@ -45,6 +45,9 @@ export default defineConfig({
     tsconfigPaths: true
   },
   build: {
+    // A Home Assistant card ships as one file by design: Tailwind's compiler
+    // and daisyUI are most of it, and splitting would only add requests.
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       input: 'src/main.ts',
       output: {

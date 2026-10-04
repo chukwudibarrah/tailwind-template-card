@@ -49,20 +49,11 @@ export type ConfigReducerAction = {
   payload: Partial<ConfigState> | object
 }
 
-/**
- * @deprecated The card now always uses Home Assistant's own code editor.
- * Retained so existing configs carrying `code_editor` still load.
- */
-export enum CodeEditorOptionsEnum {
-  ACE = 'Ace',
-  TEXTAREA = 'Textarea',
-  CODEMIRROR_DEV = 'CodeMirror_dev'
-}
-
 type PluginOptions = {
   enabled: boolean
   /** @deprecated daisyUI is compiled into the card; no CDN fetch is made. */
   url?: string
+  /** `auto` follows Home Assistant; otherwise `<scheme> - <daisyUI theme>`. */
   theme?: string
 }
 
@@ -85,11 +76,12 @@ export type ConfigState = {
   entities: string[]
   parse_jinja: boolean
   plugins: {
-    daisyui: PluginOptions & DaisyUIOptions,
-    tailwindElements: PluginOptions
+    daisyui: PluginOptions & DaisyUIOptions
+    /** @deprecated Never implemented; accepted so old configs still load. */
+    tailwindElements?: PluginOptions
   }
   /** @deprecated Ignored; Home Assistant's editor is always used. */
-  code_editor?: CodeEditorOptionsEnum
+  code_editor?: string
   bindings: Binding[]
   actions: Action[]
   debounceChangePeriod: number

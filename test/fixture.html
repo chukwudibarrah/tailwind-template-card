@@ -4,8 +4,21 @@
   <body>
     <div id="host"></div>
     <script>
-      window.customCards = []
+      // `?no-registry` leaves `customCards` undefined, as a dashboard does
+      // when this is the first custom card to load.
+      if (!location.search.includes('no-registry')) window.customCards = []
       window.__ready = false
+
+      // Polls until `fn` returns something truthy, instead of a fixed sleep.
+      window.__waitFor = async (fn, timeout = 3000) => {
+        const end = performance.now() + timeout
+        while (performance.now() < end) {
+          const value = fn()
+          if (value) return value
+          await new Promise((r) => setTimeout(r, 20))
+        }
+        throw new Error('timed out waiting for ' + fn)
+      }
     </script>
     <script type="module" src="/dist/tailwind-template-card.js"></script>
     <script type="module">
@@ -25,6 +38,9 @@
       }
 
       window.__subscriptions = { opened: 0, closed: 0 }
+      // Every render_template subscription, newest last, so a test can push
+      // a fresh result the way Home Assistant does when state changes.
+      window.__templates = []
 
       window.__makeHass = () => ({
         states,
@@ -36,6 +52,7 @@
         connection: {
           subscribeMessage: (cb, msg) => {
             window.__subscriptions.opened++
+            window.__templates.push({ cb, msg })
             queueMicrotask(() =>
               cb({
                 result: msg.template,

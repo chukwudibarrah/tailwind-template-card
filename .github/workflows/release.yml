@@ -15,14 +15,27 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - name: Install
         run: npm ci
+      # The version the card logs comes from package.json, so a tag that
+      # disagrees with it would ship a bundle reporting the wrong version.
+      - name: Check tag matches package.json
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "$expected" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json ($expected)"
+            exit 1
+          fi
       - name: Lint
         run: npm run lint
-      - name: Build card
-        run: npm run build
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test
+        run: |
+          npx playwright install --with-deps chromium
+          npm test
       - name: Check if tag is a prerelease
         id: check-tag
         run: |

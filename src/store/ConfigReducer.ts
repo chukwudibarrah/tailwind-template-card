@@ -9,7 +9,8 @@ import {
   registerCardEventHandler,
   unregisterCardEventHandler
 } from '@utils/events'
-import { useCallback, useEffect, useReducer } from 'preact/hooks'
+import { useCallback, useLayoutEffect, useReducer } from 'preact/hooks'
+import { fulfillWithDefaults, initialConfigState } from './configDefaults'
 
 export const ConfigReducer = (
   state: ConfigState,
@@ -26,43 +27,6 @@ export const ConfigReducer = (
   } else {
     return state
   }
-}
-
-export const defaultConfigState: ConfigState = {
-  entity: '',
-  content: '',
-  ignore_line_breaks: true,
-  always_update: false,
-  bare: false,
-  parse_jinja: true,
-  entities: [],
-  bindings: [],
-  actions: [],
-  debounceChangePeriod: 100,
-  plugins: {
-    daisyui: {
-      enabled: true,
-      theme: 'dark - dark',
-      themes: 'light --default, dark --prefersdark',
-      overrideCardBackground: false
-    },
-    tailwindElements: {
-      enabled: false
-    }
-  }
-}
-
-export const fulfillWithDefaults = (config: Partial<ConfigState>) => {
-  return { ...defaultConfigState, ...config } as ConfigState
-}
-
-export const initialConfigState: ConfigState = {
-  ...defaultConfigState,
-  content: `<div class="flex flex-row gap-2 justify-center">
-  {% for color in ["primary", "secondary", "accent", "info", "warning", "error", "info"] %}
-    <div class="w-12 h-12 bg-{{color}} rounded-lg cursor-pointer hover:translate-y-2 transition-all animate-bounce hover:animate-spin"></div>
-  {% endfor %}
-</div>`
 }
 
 export const useConfigReducer = () => {
@@ -88,8 +52,15 @@ export const useConfigReducer = () => {
    * accumulated listener then dispatched an update, causing another render and
    * another listener. The editor degraded with each keystroke until the page
    * was reloaded.
+   *
+   * A layout effect, not a plain one: Preact runs it before `render()`
+   * returns, while a plain effect waits for a later frame. The editor element
+   * mounts this tree in its constructor and Home Assistant can call
+   * `setConfig` straight after, so with a plain effect a config arriving
+   * before the first frame was dropped and the editor showed the demo content
+   * in place of the card's own — ready to be saved over it.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onConfigReceived = (e: Event) => {
       const config = (e as CustomEvent).detail.config as ConfigState
       updateConfig(fulfillWithDefaults(config), false)

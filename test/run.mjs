@@ -949,7 +949,418 @@ check(
   `chips=${suggested.remaining.join(' | ')}`
 )
 
+// Errors a test provokes on purpose are removed from the console log, so the
+// final "no console errors" check still catches everything else.
+const dropExpectedErrors = (pattern) => {
+  for (let i = consoleErrors.length - 1; i >= 0; i--) {
+    if (pattern.test(consoleErrors[i])) consoleErrors.splice(i, 1)
+  }
+}
+
+// --- Class bindings follow state instead of accumulating -------------------
+// A binding-only update (no new template render) used to add the new class
+// beside the old one, and never compiled it, so the card stayed on its first
+// state.
+const swap = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  const base = window.__makeHass()
+  const withState = (state) => ({
+    ...base,
+    states: {
+      ...base.states,
+      'light.living_room': { entity_id: 'light.living_room', state, attributes: {} }
+    }
+  })
+  card.hass = withState('on')
+  card.setConfig({
+    entity: 'light.living_room',
+    content: '<div id="swap" class="h-4">x</div>',
+    bindings: [{
+      selector: '#swap',
+      type: 'class',
+      bind: "return state === 'on' ? 'bg-amber-400' : 'bg-sky-700'"
+    }]
+  })
+
+  const on = await window.__waitFor(() => card.shadowRoot.querySelector('#swap.bg-amber-400'))
+  await window.__waitFor(() => getComputedStyle(on).backgroundColor !== 'rgba(0, 0, 0, 0)')
+  const onBg = getComputedStyle(on).backgroundColor
+
+  card.hass = withState('off')
+  const off = await window.__waitFor(() => card.shadowRoot.querySelector('#swap.bg-sky-700'))
+  await window.__waitFor(() => getComputedStyle(off).backgroundColor !== onBg).catch(() => null)
+
+  return { classes: off.className, onBg, offBg: getComputedStyle(off).backgroundColor }
+})
+
+check('a class binding replaces the class it added last time',
+  swap.classes === 'h-4 bg-sky-700', `classes=${swap.classes}`)
+check('a class first introduced by a state change is compiled',
+  swap.offBg !== swap.onBg && swap.offBg !== 'rgba(0, 0, 0, 0)',
+  `on=${swap.onBg} off=${swap.offBg}`)
+
+// --- Bindings tolerate bad input ------------------------------------------
+const tolerant = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  card.setConfig({
+    content: '<div id="multi">m</div><div id="later">-</div>',
+    bindings: [
+      // Half-typed in the editor: querySelectorAll throws on this.
+      { selector: '[data-', type: 'text', bind: "return 'never'" },
+      { selector: '#multi', type: 'class', bind: "return 'text-red-500 font-bold'" },
+      { selector: '#later', type: 'text', bind: "return 'ran'" }
+    ]
+  })
+  const later = await window.__waitFor(() => {
+    const el = card.shadowRoot.querySelector('#later')
+    return el?.textContent === 'ran' && el
+  }).catch(() => card.shadowRoot.querySelector('#later'))
+  return {
+    multi: card.shadowRoot.querySelector('#multi')?.className,
+    later: later?.textContent
+  }
+})
+
+check('a class binding may return several classes',
+  tolerant.multi === 'text-red-500 font-bold', `class=${JSON.stringify(tolerant.multi)}`)
+check('an invalid selector does not stop the other bindings',
+  tolerant.later === 'ran', `text=${JSON.stringify(tolerant.later)}`)
+
+// --- One failing action does not stop the others --------------------------
+const failing = await page.evaluate(async () => {
+  window.__lastServiceCall = null
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  card.setConfig({
+    content: '<div id="act">go</div>',
+    actions: [
+      { selector: '[data-', type: 'click', call: 'throw new Error("never")' },
+      { selector: '#act', type: 'click', call: 'throw new Error("deliberate")' },
+      { selector: '#act', type: 'click', call: "hass.callService('light', 'toggle', {})" }
+    ]
+  })
+  const act = await window.__waitFor(() => card.shadowRoot.querySelector('#act'))
+  act.click()
+  return window.__lastServiceCall
+})
+dropExpectedErrors(/action on "#act" failed/)
+
+check('a throwing action does not stop the actions after it',
+  failing?.service === 'toggle', JSON.stringify(failing))
+
+// --- Template errors are shown, and clear once fixed -----------------------
+const templateError = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  card.setConfig({ content: '<div id="good">good</div>' })
+  await window.__waitFor(() => card.shadowRoot.querySelector('#good'))
+  const sub = window.__templates.at(-1)
+
+  sub.cb({ error: "UndefinedError: 'nope' is undefined", level: 'ERROR' })
+  const alert = await window.__waitFor(() => card.shadowRoot.querySelector('ha-alert')).catch(() => null)
+  const shown = {
+    message: alert?.textContent ?? null,
+    keptContent: Boolean(card.shadowRoot.querySelector('#good'))
+  }
+
+  sub.cb({ error: 'just a warning', level: 'WARNING' })
+  await new Promise((r) => setTimeout(r, 100))
+  const afterWarning = card.shadowRoot.querySelector('ha-alert')?.textContent ?? null
+
+  sub.cb({ result: '<div id="fixed">fixed</div>' })
+  await window.__waitFor(() => card.shadowRoot.querySelector('#fixed'))
+  return { ...shown, afterWarning, cleared: !card.shadowRoot.querySelector('ha-alert') }
+})
+dropExpectedErrors(/template error/)
+
+check('a template error is shown in the card',
+  /nope/.test(templateError.message ?? ''), `alert=${JSON.stringify(templateError.message)}`)
+check('the last good render stays up beside the error', templateError.keptContent)
+check('a template warning does not replace the error banner with itself',
+  !/warning/.test(templateError.afterWarning ?? ''), `alert=${JSON.stringify(templateError.afterWarning)}`)
+check('the error clears once the template renders again', templateError.cleared)
+
+// --- Partial plugin configs ------------------------------------------------
+const partial = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  card.setConfig({ content: '<div id="partial">p</div>', plugins: {} })
+  return Boolean(await window.__waitFor(() => card.shadowRoot.querySelector('#partial')).catch(() => null))
+})
+check('`plugins: {}` still renders', partial)
+
+// --- ignore_line_breaks: false never touches the template ------------------
+const breaks = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  const content = '{% if true and\n   true %}<b id="lb">a</b>\nb{% endif %}'
+  card.setConfig({ content, ignore_line_breaks: false })
+  await window.__waitFor(() => card.shadowRoot.querySelector('#lb'))
+  const container = card.shadowRoot.querySelector('ha-card > div')
+  return {
+    sent: window.__templates.at(-1).msg.template,
+    content,
+    breaks: container.querySelectorAll('br').length
+  }
+})
+check('line breaks are not injected into the Jinja template',
+  breaks.sent === breaks.content, `template=${JSON.stringify(breaks.sent)}`)
+check('line breaks become <br> in the rendered output', breaks.breaks === 2, `br count=${breaks.breaks}`)
+
+// --- Config changes that leave the content alone still repaint ------------
+const repaint = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  card.setConfig({ content: '<div id="rp">x</div>' })
+  const haCard = await window.__waitFor(() => card.shadowRoot.querySelector('#rp') && card.shadowRoot.querySelector('ha-card'))
+  card.setConfig({ content: '<div id="rp">x</div>', bare: true })
+  await window.__waitFor(() => haCard.style.getPropertyValue('--ha-card-background')).catch(() => null)
+  return haCard.style.getPropertyValue('--ha-card-background')
+})
+check('toggling `bare` without editing content takes effect', repaint === 'transparent', `background=${JSON.stringify(repaint)}`)
+
+// --- Updates morph the DOM in place --------------------------------------
+const morph = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  card.setConfig({ content: '<div><input id="field" /><span id="txt">one</span></div>' })
+  const field = await window.__waitFor(() => card.shadowRoot.querySelector('#field'))
+  const sub = window.__templates.at(-1)
+
+  // Something else in the shadow root, as card-mod injects.
+  const extra = document.createElement('style')
+  extra.id = 'extra'
+  card.shadowRoot.appendChild(extra)
+
+  field.focus()
+  field.value = 'typed'
+
+  sub.cb({ result: '<div><input id="field" /><span id="txt">two</span></div>' })
+  await window.__waitFor(() => card.shadowRoot.querySelector('#txt')?.textContent === 'two')
+
+  return {
+    sameNode: card.shadowRoot.querySelector('#field') === field,
+    value: card.shadowRoot.querySelector('#field').value,
+    focused: card.shadowRoot.activeElement === field,
+    extraKept: Boolean(card.shadowRoot.querySelector('#extra'))
+  }
+})
+check('an update keeps unchanged elements (morph, not replace)', morph.sameNode)
+check('a focused input keeps what was typed across an update', morph.value === 'typed', `value=${JSON.stringify(morph.value)}`)
+check('focus survives an update', morph.focused)
+check('other nodes in the shadow root survive an update', morph.extraKept)
+
+const transition = await page.evaluate(async () => {
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  const bar = (w) => `<div class="w-[400px]"><div id="bar" class="h-2 ${w} transition-all duration-1000 ease-linear"></div></div>`
+  card.setConfig({ content: bar('w-1/4') })
+  const el = await window.__waitFor(() => card.shadowRoot.querySelector('#bar'))
+  await window.__waitFor(() => el.getBoundingClientRect().width === 100)
+  // Compile the target class first so only the transition is being measured.
+  await card.applyStyles(['w-3/4'])
+
+  window.__templates.at(-1).cb({ result: bar('w-3/4') })
+  await window.__waitFor(() => card.shadowRoot.querySelector('#bar').classList.contains('w-3/4'))
+  await new Promise((r) => setTimeout(r, 300))
+  return card.shadowRoot.querySelector('#bar').getBoundingClientRect().width
+})
+check('a state-driven width change animates instead of jumping',
+  transition > 100 && transition < 300, `width 300ms in=${transition}`)
+
+// --- The theme follows Home Assistant --------------------------------------
+const theme = await page.evaluate(async () => {
+  const withMode = (darkMode) => ({ ...window.__makeHass(), themes: { darkMode } })
+  const mount = async (config, hass) => {
+    const card = document.createElement('tailwind-template-card')
+    document.getElementById('host').appendChild(card)
+    card.hass = hass
+    card.setConfig({ content: '<div class="themed">t</div>', ...config })
+    await window.__waitFor(() => card.shadowRoot.querySelector('.themed'))
+    return card
+  }
+  const themeOf = (card) => card.shadowRoot.querySelector('ha-card > div').getAttribute('data-theme')
+
+  const follows = await mount({}, withMode(true))
+  const darkAtFirst = themeOf(follows)
+  follows.hass = withMode(false)
+  await window.__waitFor(() => themeOf(follows) === 'light').catch(() => null)
+
+  const pinned = await mount({ plugins: { daisyui: { theme: 'dark - dark' } } }, withMode(false))
+  return { darkAtFirst, afterSwitch: themeOf(follows), pinned: themeOf(pinned) }
+})
+check('by default the theme follows Home Assistant dark mode', theme.darkAtFirst === 'dark', `theme=${theme.darkAtFirst}`)
+check('switching Home Assistant to light mode repaints the card', theme.afterSwitch === 'light', `theme=${theme.afterSwitch}`)
+check('an explicitly chosen theme is kept', theme.pinned === 'dark', `theme=${theme.pinned}`)
+
+// --- Cards share their stylesheets -----------------------------------------
+const shared = await page.evaluate(async () => {
+  const cards = []
+  for (let i = 0; i < 2; i++) {
+    const card = document.createElement('tailwind-template-card')
+    document.getElementById('host').appendChild(card)
+    card.hass = window.__makeHass()
+    card.setConfig({ content: `<div id="s${i}" class="flex">s</div>` })
+    cards.push(card)
+  }
+  await window.__waitFor(() => cards.every((c) => c.shadowRoot.adoptedStyleSheets.length === 2))
+  const [a, b] = cards.map((c) => c.shadowRoot.adoptedStyleSheets)
+  return a[0] === b[0] && a[1] === b[1]
+})
+check('cards with the same plugins adopt the same stylesheets', shared)
+
+// --- Keyboard activation ---------------------------------------------------
+const keyboard = await page.evaluate(async () => {
+  window.__lastServiceCall = null
+  const card = document.createElement('tailwind-template-card')
+  document.getElementById('host').appendChild(card)
+  card.hass = window.__makeHass()
+  card.setConfig({
+    content: '<div id="kb" role="button" tabindex="0">k</div><div id="plain">p</div>',
+    actions: [{ selector: '#kb, #plain', type: 'click', call: "hass.callService('light', 'toggle', { via: this.id })" }]
+  })
+  const kb = await window.__waitFor(() => card.shadowRoot.querySelector('#kb'))
+  const press = (el, key) =>
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, composed: true, cancelable: true }))
+
+  press(card.shadowRoot.querySelector('#plain'), 'Enter')
+  const plain = window.__lastServiceCall
+  press(kb, 'Enter')
+  const enter = window.__lastServiceCall?.data?.via
+  window.__lastServiceCall = null
+  press(kb, ' ')
+  const space = window.__lastServiceCall?.data?.via
+  return { plain, enter, space }
+})
+check('Enter on a role="button" element fires its click action', keyboard.enter === 'kb', JSON.stringify(keyboard))
+check('Space does too', keyboard.space === 'kb', JSON.stringify(keyboard))
+check('elements that did not opt in ignore the keyboard', keyboard.plain === null, JSON.stringify(keyboard))
+
+// --- Config validation and stub ------------------------------------------
+const validation = await page.evaluate(() => {
+  const card = document.createElement('tailwind-template-card')
+  const attempt = (config) => {
+    try { card.setConfig(config); return null } catch (e) { return e.message }
+  }
+  return {
+    bindings: attempt({ content: 'x', bindings: 'nope' }),
+    content: attempt({ content: 42 }),
+    rule: attempt({ content: 'x', actions: ['click'] }),
+    valid: attempt({ content: 'x' }),
+    stub: customElements.get('tailwind-template-card').getStubConfig()
+  }
+})
+check('setConfig rejects a non-list `bindings`', /bindings/.test(validation.bindings ?? ''), validation.bindings)
+check('setConfig rejects non-string `content`', /content/.test(validation.content ?? ''), validation.content)
+check('setConfig rejects a rule that is not a mapping', /actions/.test(validation.rule ?? ''), validation.rule)
+check('a valid config is accepted', validation.valid === null, validation.valid)
+check('the stub config holds only the content',
+  JSON.stringify(Object.keys(validation.stub)) === '["content"]', JSON.stringify(Object.keys(validation.stub)))
+
+// --- The editor keeps a config that arrives before anything else ----------
+const early = await page.evaluate(async () => {
+  const el = document.createElement('tailwind-template-card-config')
+  document.getElementById('host').appendChild(el)
+  // No hass yet, and no frame between construction and setConfig.
+  el.setConfig({ content: '<p>mine</p>', actions: [{ selector: '#a', type: 'click', call: 'x' }] })
+  await window.__waitFor(() => el.shadowRoot.querySelector('[data-rule]')).catch(() => null)
+  return {
+    rules: el.shadowRoot.querySelectorAll('[data-rule]').length,
+    content: el.shadowRoot.querySelector('textarea')?.value ?? el.shadowRoot.querySelector('ha-code-editor')?.value
+  }
+})
+check('the editor keeps a config set before hass arrives',
+  early.rules === 1 && early.content === '<p>mine</p>', JSON.stringify(early))
+
+// --- The editor writes back only what changed ------------------------------
+const written = await page.evaluate(async () => {
+  const el = document.createElement('tailwind-template-card-config')
+  document.getElementById('host').appendChild(el)
+  let latest = null
+  el.addEventListener('config-changed', (e) => {
+    latest = e.detail.config
+    el.setConfig(e.detail.config)
+  })
+  el.hass = window.__makeHass()
+  el.setConfig({ type: 'custom:tailwind-template-card', content: '<p>a</p>', debounceChangePeriod: 50 })
+
+  const editor = await window.__waitFor(() => el.shadowRoot.querySelector('ha-code-editor'))
+  editor.value = '<p>b</p>'
+  editor.dispatchEvent(new CustomEvent('value-changed', {
+    bubbles: true, composed: true, detail: { value: '<p>b</p>' }
+  }))
+  await window.__waitFor(() => latest?.content === '<p>b</p>')
+  return latest
+})
+check('the editor writes back only non-default options',
+  JSON.stringify(Object.keys(written).sort()) === '["content","debounceChangePeriod","type"]',
+  JSON.stringify(written))
+
+// --- The editor's entity picker is Home Assistant's, with live hass --------
+const picker = await page.evaluate(async () => {
+  if (!customElements.get('ha-entity-picker')) {
+    customElements.define('ha-entity-picker', class extends HTMLElement {})
+  }
+  const el = document.createElement('tailwind-template-card-config')
+  document.getElementById('host').appendChild(el)
+  let latest = null
+  el.addEventListener('config-changed', (e) => {
+    latest = e.detail.config
+    el.setConfig(e.detail.config)
+  })
+  const first = window.__makeHass()
+  el.hass = first
+  el.setConfig({ content: 'x' })
+
+  const tab = await window.__waitFor(() =>
+    [...el.shadowRoot.querySelectorAll('[role="tab"]')].find((t) => t.textContent === 'Tweaks'))
+  tab.click()
+  const node = await window.__waitFor(() => el.shadowRoot.querySelector('ha-entity-picker'))
+  const sawFirst = node.hass === first
+
+  const second = window.__makeHass()
+  el.hass = second
+  await window.__waitFor(() => node.hass === second).catch(() => null)
+  const sawSecond = node.hass === second
+
+  node.dispatchEvent(new CustomEvent('value-changed', { detail: { value: 'light.living_room' } }))
+  await window.__waitFor(() => latest?.entity === 'light.living_room').catch(() => null)
+  return { sawFirst, sawSecond, entity: latest?.entity ?? null, tabIsButton: tab.tagName === 'BUTTON' }
+})
+check('editor tabs are buttons', picker.tabIsButton)
+check('the entity picker is Home Assistant\'s ha-entity-picker', picker.sawFirst)
+check('the entity picker receives each new hass', picker.sawSecond)
+check('picking an entity updates the config', picker.entity === 'light.living_room', `entity=${picker.entity}`)
+
 check('no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
+
+// --- First card on the dashboard -------------------------------------------
+// Home Assistant does not create `window.customCards`; pushing onto it when
+// no card had yet threw at load, so the card never reached the card picker.
+const firstCard = await browser.newPage()
+const firstCardErrors = []
+firstCard.on('pageerror', (e) => firstCardErrors.push(String(e)))
+await firstCard.goto(`${base}/test/fixture.html?no-registry`)
+await firstCard.waitForFunction(() => window.__ready && customElements.get('tailwind-template-card'))
+const pickerTypes = await firstCard.evaluate(() =>
+  (window.customCards ?? []).map((c) => c.type))
+await firstCard.close()
+
+check('loads cleanly when it is the first custom card',
+  firstCardErrors.length === 0, firstCardErrors.join(' | '))
+check('it then appears in the card picker',
+  pickerTypes.includes('tailwind-template-card'), JSON.stringify(pickerTypes))
+
 
 await browser.close()
 server.close()
