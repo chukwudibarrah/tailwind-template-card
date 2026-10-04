@@ -9,6 +9,10 @@ import utilitiesCss from 'tailwindcss/utilities.css?raw'
 
 import daisyuiPlugin from 'daisyui'
 
+import { splitAtProperties } from './cssScan.ts'
+
+export { extractCandidates } from './cssScan.ts'
+
 type Compiler = Awaited<ReturnType<typeof compile>>
 
 /**
@@ -32,49 +36,6 @@ const MODULES: Record<string, PluginModule> = {
   daisyui: daisyuiPlugin
 }
 
-/**
- * Extracts utility class candidates from rendered HTML.
- *
- * Tailwind's real scanner is a native (Rust) binary and cannot run in the
- * browser, but we do not need it: the card already holds the exact HTML it is
- * about to render, so reading the class attributes is both sufficient and
- * cheap. Arbitrary values use underscores rather than spaces by Tailwind
- * convention, so splitting on whitespace is safe.
- */
-const CLASS_ATTRIBUTE = /class(?:Name)?\s*=\s*(?:"([^"]*)"|'([^']*)')/g
-
-export const extractCandidates = (html: string): string[] => {
-  const found = new Set<string>()
-  let match: RegExpExecArray | null
-
-  CLASS_ATTRIBUTE.lastIndex = 0
-  while ((match = CLASS_ATTRIBUTE.exec(html)) !== null) {
-    const value = match[1] ?? match[2] ?? ''
-    for (const token of value.split(/\s+/)) {
-      if (token) found.add(token)
-    }
-  }
-
-  return [...found]
-}
-
-/**
- * `@property` rules are registered per document, and a browser ignores them
- * entirely when they arrive inside a shadow root's adopted stylesheets. Tailwind
- * v4 leans on registered custom properties for gradients, transforms, shadows
- * and filters, so those utilities silently render as nothing unless the rules
- * are hoisted to the document.
- *
- * Verified in Chrome: a gradient defined against a shadow-scoped `@property`
- * computes to `none`; the same rule adopted on `document` resolves correctly.
- */
-const AT_PROPERTY_RULE = /@property\s+--[\w-]+\s*\{[^}]*\}/g
-
-export const splitAtProperties = (css: string) => {
-  const properties = css.match(AT_PROPERTY_RULE) ?? []
-  return { properties, rest: css.replace(AT_PROPERTY_RULE, '') }
-}
-
 /** Document-level sheet holding every `@property` rule any card has needed. */
 let propertySheet: CSSStyleSheet | null = null
 const registeredProperties = new Set<string>()
@@ -83,7 +44,7 @@ const registeredProperties = new Set<string>()
  * Registers `@property` rules on the document, once each. Shared across every
  * card instance, since custom property registration is global anyway.
  */
-export const ensureAtPropertiesRegistered = (rules: string[]) => {
+const ensureAtPropertiesRegistered = (rules: string[]) => {
   const unseen = rules.filter(rule => !registeredProperties.has(rule))
   if (unseen.length === 0) return
 
@@ -101,15 +62,17 @@ type CacheEntry = {
   compiler: Compiler
   candidates: Set<string>
   css: string
+  /** Adopted by every card using this entry stylesheet. */
+  sheet: CSSStyleSheet
 }
 
 /**
  * Compiles Tailwind CSS in the browser from a candidate list.
  *
- * Compilers are cached per entry stylesheet (building one is comparatively
- * expensive), and each compiler accumulates the candidates it has been asked
- * for so that repeated renders only trigger a rebuild when genuinely new
- * classes appear.
+ * One compiler, and one constructed stylesheet, per entry stylesheet. Every
+ * card with the same plugin setup adopts the same sheet: each compiler already
+ * accumulated every card's classes, so per-card sheets only meant the same
+ * growing stylesheet being parsed once per card on the dashboard.
  */
 export class TailwindEngine {
   private static cache = new Map<string, Promise<CacheEntry>>()
@@ -151,14 +114,24 @@ export class TailwindEngine {
       }
     })
 
-    return { compiler, candidates: new Set<string>(), css: '' }
+    return {
+      compiler,
+      candidates: new Set<string>(),
+      css: '',
+      sheet: new CSSStyleSheet()
+    }
   }
 
   /**
-   * Returns the CSS needed for `candidates`, reusing previous work where
-   * possible. Resolves to the full stylesheet for everything seen so far.
+   * Returns the shared sheet for `entryCss`, after making sure it covers
+   * `candidates`. The sheet is updated synchronously with the compile, so
+   * cards awaiting the same compiler can never write an older result over a
+   * newer one.
    */
-  static async build(entryCss: string, candidates: string[]): Promise<string> {
+  static async sheetFor(
+    entryCss: string,
+    candidates: string[]
+  ): Promise<CSSStyleSheet> {
     let pending = this.cache.get(entryCss)
 
     if (!pending) {
@@ -175,14 +148,18 @@ export class TailwindEngine {
       throw e
     }
 
-    const unseen = candidates.filter((c) => !entry.candidates.has(c))
-    if (unseen.length === 0 && entry.css) {
-      return entry.css
-    }
+    const unseen = candidates.filter(c => !entry.candidates.has(c))
+    if (unseen.length === 0 && entry.css) return entry.sheet
 
-    unseen.forEach((c) => entry.candidates.add(c))
+    unseen.forEach(c => entry.candidates.add(c))
     entry.css = entry.compiler.build([...entry.candidates])
 
-    return entry.css
+    // `@property` only takes effect at document scope, so those rules are
+    // hoisted out before the rest is adopted into shadow roots.
+    const { properties, rest } = splitAtProperties(entry.css)
+    ensureAtPropertiesRegistered(properties)
+    entry.sheet.replaceSync(rest)
+
+    return entry.sheet
   }
 }

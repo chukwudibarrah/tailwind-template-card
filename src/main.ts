@@ -5,8 +5,14 @@ import { TailwindTemplateCard } from './elements/TailwindTemplateCard.tsx'
 import { TailwindTemplateCardConfig } from './elements/TailwindTemplateCardConfig.tsx'
 import { CARD_TYPE, CONFIG_TYPE, LEGACY_CARD_TYPE } from './constants.ts'
 
-customElements.define(CARD_TYPE, TailwindTemplateCard)
-customElements.define(CONFIG_TYPE, TailwindTemplateCardConfig)
+// Guarded: a resource registered twice (or cached alongside a newer copy)
+// would otherwise throw on the second definition.
+if (!customElements.get(CARD_TYPE)) {
+  customElements.define(CARD_TYPE, TailwindTemplateCard)
+}
+if (!customElements.get(CONFIG_TYPE)) {
+  customElements.define(CONFIG_TYPE, TailwindTemplateCardConfig)
+}
 
 /**
  * Keep the upstream card type working.
@@ -23,10 +29,14 @@ if (!customElements.get(LEGACY_CARD_TYPE)) {
   customElements.define(LEGACY_CARD_TYPE, LegacyTailwindTemplateCard)
 }
 
-// Only the current type is offered in the card picker.
-window.customCards.push({
-  type: CARD_TYPE,
-  name: 'Tailwind Template Card',
-  description: 'Write HTML with Tailwind CSS classes and Jinja templates',
-  preview: true
-})
+// Only the current type is offered in the card picker. Home Assistant doesn't
+// create this array; whichever card loads first does.
+window.customCards = window.customCards ?? []
+if (!window.customCards.some(card => card.type === CARD_TYPE)) {
+  window.customCards.push({
+    type: CARD_TYPE,
+    name: 'Tailwind Template Card',
+    description: 'Write HTML with Tailwind CSS classes and Jinja templates',
+    preview: true
+  })
+}

@@ -10,6 +10,7 @@ import {
   unregisterCardEventHandler
 } from '@utils/events'
 import { useCallback, useEffect, useReducer } from 'preact/hooks'
+import { fulfillWithDefaults, initialConfigState } from './configDefaults'
 
 export const ConfigReducer = (
   state: ConfigState,
@@ -26,43 +27,6 @@ export const ConfigReducer = (
   } else {
     return state
   }
-}
-
-export const defaultConfigState: ConfigState = {
-  entity: '',
-  content: '',
-  ignore_line_breaks: true,
-  always_update: false,
-  bare: false,
-  parse_jinja: true,
-  entities: [],
-  bindings: [],
-  actions: [],
-  debounceChangePeriod: 100,
-  plugins: {
-    daisyui: {
-      enabled: true,
-      theme: 'dark - dark',
-      themes: 'light --default, dark --prefersdark',
-      overrideCardBackground: false
-    },
-    tailwindElements: {
-      enabled: false
-    }
-  }
-}
-
-export const fulfillWithDefaults = (config: Partial<ConfigState>) => {
-  return { ...defaultConfigState, ...config } as ConfigState
-}
-
-export const initialConfigState: ConfigState = {
-  ...defaultConfigState,
-  content: `<div class="flex flex-row gap-2 justify-center">
-  {% for color in ["primary", "secondary", "accent", "info", "warning", "error", "info"] %}
-    <div class="w-12 h-12 bg-{{color}} rounded-lg cursor-pointer hover:translate-y-2 transition-all animate-bounce hover:animate-spin"></div>
-  {% endfor %}
-</div>`
 }
 
 export const useConfigReducer = () => {

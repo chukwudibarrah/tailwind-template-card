@@ -1,11 +1,13 @@
-import { render } from "preact";
+import { createRef, render } from "preact";
+import { Idiomorph } from "idiomorph";
 import { HaCard } from "@components/HaCard";
 
 import { TailwindTemplateRenderer } from "./TailwindTemplateRenderer";
-import { initialConfigState } from "@store/ConfigReducer";
-import { Action, Binding, TemplateEvent } from "@types";
+import { STUB_CONTENT } from "@store/configDefaults";
+import { Action, Binding, ConfigState, TemplateEvent } from "@types";
 import { HomeAssistant } from "custom-card-helpers";
 import { CONFIG_TYPE } from "@/src/constants";
+import { applyLineBreaks, classTokens, compileUserCode } from "@utils/render";
 
 console.info(
   `%c  Tailwind Template Card  \n%c  Version ${CARD_VERSION}  \n%c  github.com/chukwudibarrah/tailwind-template-card`,
@@ -14,6 +16,8 @@ console.info(
   "color: #aef3fc; font-weight: bold; background: #2d2c35",
 );
 
+const LOG_PREFIX = "[tailwind-template-card]";
+
 /**
  * Matches entity-id shaped tokens (`domain.object_id`). Used to discover which
  * entities a template / binding / action refers to without scanning the whole
@@ -21,13 +25,44 @@ console.info(
  */
 const ENTITY_ID_PATTERN = /\b[a-z_]+\.[a-z0-9_]+\b/g;
 
+const BINDING_PARAMS = ["hass", "config", "entity", "state", "attr"];
+const ACTION_PARAMS = ["hass", "config", "entity", "moreInfo", "event"];
+
+/** `hass.themes.darkMode` is newer than the custom-card-helpers typings. */
+const isDarkMode = (hass: HomeAssistant | undefined) =>
+  Boolean((hass?.themes as { darkMode?: boolean } | undefined)?.darkMode);
+
+/** A selector the user is still typing must not break every other rule. */
+const safeQueryAll = (root: ParentNode, selector: string) => {
+  try {
+    return root.querySelectorAll(selector);
+  } catch {
+    console.warn(`${LOG_PREFIX} invalid selector, skipped:`, selector);
+    return [];
+  }
+};
+
+const safeClosest = (element: Element, selector: string) => {
+  try {
+    return element.closest(selector);
+  } catch {
+    console.warn(`${LOG_PREFIX} invalid selector, skipped:`, selector);
+    return null;
+  }
+};
+
 export class TailwindTemplateCard extends TailwindTemplateRenderer {
   _entitiesToWatch: string[] = [];
   _htmlContent: string = "";
+  /** Last template error Home Assistant reported, shown in the card. */
+  _templateError: string | null = null;
 
   /** Unsubscribe handle for the active `render_template` subscription. */
   _templateUnsub: (() => void) | null = null;
-  /** The template string the active subscription was opened for. */
+  /**
+   * The template the current subscription was opened for, from the moment it
+   * starts opening — so an update arriving meanwhile doesn't open another.
+   */
   _subscribedContent: string | null = null;
   /**
    * Incremented on every (re)subscribe so that results arriving from a
@@ -38,12 +73,29 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
   _listenerEntities: string[] = [];
   _isConnected = false;
 
+  /** Incremented per paint, so a slow style compile can't paint stale HTML. */
+  _paintGeneration = 0;
+  /** The container the content is morphed into. */
+  _contentRef = createRef<HTMLDivElement>();
+  /**
+   * Classes each `class` binding added to each element, keyed by binding
+   * index, so the binding's next value replaces its last one instead of
+   * piling up beside it.
+   */
+  _boundClasses = new WeakMap<Element, Map<number, string[]>>();
+
   static getConfigElement() {
     return document.createElement(CONFIG_TYPE);
   }
 
+  /** Only the content: every other option is written once it's changed. */
   static getStubConfig() {
-    return initialConfigState;
+    return { content: STUB_CONTENT };
+  }
+
+  /** Sizing in sections dashboards. Height follows the content. */
+  getGridOptions() {
+    return { columns: 12, min_columns: 3, rows: "auto" };
   }
 
   connectedCallback() {
@@ -108,12 +160,6 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
     this._entitiesToWatch = [...watched];
   }
 
-  renderIfNeeded(forceUpdate?: boolean) {
-    if (forceUpdate || this.needsRender()) {
-      this.processAndRender();
-    }
-  }
-
   needsRender() {
     if (!this._hass || !this._oldHass) {
       return true;
@@ -136,41 +182,64 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
     return false;
   }
 
+  /**
+   * `forceRender` comes from `setConfig` and reconnection, where options other
+   * than the content may have changed — `bare`, the theme — so the card is
+   * repainted even when the template is the same. A switch of Home
+   * Assistant's dark mode repaints for the same reason.
+   */
+  _render(forceRender?: boolean) {
+    this.updateEntitiesToWatch();
+
+    const themeChanged =
+      Boolean(this._oldHass) &&
+      isDarkMode(this._oldHass) !== isDarkMode(this._hass);
+
+    if (forceRender || themeChanged) {
+      this.processAndRender(true);
+    } else if (this.needsRender()) {
+      this.processAndRender(false);
+    }
+  }
+
   getCardSize() {
     return 1;
   }
 
-  processAndRender() {
+  processAndRender(repaint = false) {
     if (!this._hass || !this._config || this._config.content == undefined)
       return;
 
-    let content = this._config.content;
-
-    if (
-      undefined !== this._config.ignore_line_breaks &&
-      !this._config.ignore_line_breaks
-    ) {
-      content = content.replace(/\r?\n|\r/g, "</br>");
-    }
+    const content = this._config.content;
 
     if (!this._config.parse_jinja) {
       this.unsubscribeTemplate();
-      this._htmlContent = content;
-      this._renderHtmlContent();
+      this._templateError = null;
+      this._htmlContent = this.withLineBreaks(content);
+      this._paint();
       return;
     }
 
     // HA pushes a new result whenever the template's dependencies change, so
     // one subscription per template string is all we ever need. Re-subscribing
     // on each state change (as upstream did) leaks a subscription per update.
-    if (this._templateUnsub && this._subscribedContent === content) {
-      // Already subscribed to exactly this template; bindings still need to be
-      // reapplied against the latest hass state.
-      this.applyBindings();
+    if (this._subscribedContent === content) {
+      if (repaint) {
+        this._paint();
+      } else {
+        // Only bindings can depend on state HA hasn't pushed a new render for.
+        this.refreshBindings();
+      }
       return;
     }
 
     this.subscribeTemplate(content);
+  }
+
+  withLineBreaks(html: string) {
+    return this._config.ignore_line_breaks === false
+      ? applyLineBreaks(html)
+      : html;
   }
 
   subscribeTemplate(content: string) {
@@ -188,7 +257,15 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
           if (generation !== this._subscriptionGeneration) return;
 
           if (msg.error) {
-            console.error("template error:", msg.error);
+            // Warnings (an undefined variable, say) still render; HA sends
+            // the result separately.
+            if (msg.level === "WARNING") {
+              console.warn(`${LOG_PREFIX} template warning:`, msg.error);
+              return;
+            }
+            console.error(`${LOG_PREFIX} template error:`, msg.error);
+            this._templateError = msg.error;
+            this._paint();
             return;
           }
 
@@ -196,9 +273,10 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
             this._listenerEntities = msg.listeners.entities;
           }
 
-          this._htmlContent = msg.result ?? "";
+          this._templateError = null;
+          this._htmlContent = this.withLineBreaks(msg.result ?? "");
           this.updateEntitiesToWatch();
-          this._renderHtmlContent();
+          this._paint();
         },
         {
           type: "render_template",
@@ -215,97 +293,163 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
         this._templateUnsub = unsub;
       })
       .catch((e) => {
-        console.error("failed to subscribe to template", e);
+        console.error(`${LOG_PREFIX} failed to subscribe to template`, e);
         if (generation === this._subscriptionGeneration) {
           this._subscribedContent = null;
+          // A template that doesn't parse is rejected here rather than
+          // reported through the subscription.
+          this._templateError =
+            (e as { message?: string })?.message ?? String(e);
+          this._paint();
         }
       });
   }
 
-  _render(forceRender?: boolean) {
-    this.updateEntitiesToWatch();
-    this.renderIfNeeded(forceRender);
+  /**
+   * Brings the shadow root up to date with `_htmlContent` and the config.
+   *
+   * The content is morphed into place rather than replaced, so elements that
+   * didn't change keep their identity — focus, a slider mid-drag, a running
+   * transition — and anything else in the shadow root is left alone.
+   */
+  async _paint() {
+    if (!this._hass || !this._config || !this.shadow) return;
+
+    const generation = ++this._paintGeneration;
+
+    try {
+      // Compile styles before painting so content never flashes unstyled.
+      await this.applyStyles(this.candidatesFromHtml(this._htmlContent));
+      if (generation !== this._paintGeneration) return;
+
+      render(
+        <HaCard
+          config={this._config}
+          darkMode={isDarkMode(this._hass)}
+          error={this._templateError}
+          contentRef={this._contentRef}
+          onEvent={(e) => this.handleActions(e)}
+        />,
+        this.shadow,
+      );
+
+      const container = this._contentRef.current;
+      if (container) this.morphContent(container, this._htmlContent);
+
+      this.applyBindings();
+
+      // Bindings may have introduced classes that were not in the source HTML.
+      await this.applyStyles(this.candidatesFromDom());
+    } catch (e) {
+      console.error(`${LOG_PREFIX} render failed`, e);
+    }
   }
 
-  async _renderHtmlContent() {
-    this.ensureIsReadyForRender();
-
-    // Compile styles before painting so content never flashes unstyled.
-    await this.applyStyles(this.candidatesFromHtml(this._htmlContent));
-
-    this._deRender();
-    render(
-      <HaCard
-        htmlContent={this._htmlContent}
-        config={this._config}
-        onEvent={(e) => this.handleActions(e)}
-      />,
-      this.shadow,
-    );
-
-    this.applyBindings();
-
-    // Bindings may have introduced classes that were not in the source HTML.
-    await this.applyStyles(this.candidatesFromDom());
+  morphContent(container: HTMLElement, html: string) {
+    const shadow = this.shadow;
+    Idiomorph.morph(container, html, {
+      morphStyle: "innerHTML",
+      callbacks: {
+        // Idiomorph's own `ignoreActiveValue` compares against
+        // `document.activeElement`, which is this card's host whenever focus
+        // is inside it. The shadow root knows the real one.
+        beforeAttributeUpdated: (attribute, element) =>
+          !(
+            (attribute === "value" || attribute === "checked") &&
+            element === shadow.activeElement
+          ),
+      },
+    });
   }
 
-  ensureIsReadyForRender() {
-    if (!this._hass) {
-      throw new Error("this._hass is invalid");
-    }
-    if (this._config === undefined) {
-      throw new Error("this.config is invalid");
-    }
-    if (this._config.content === undefined) {
-      throw new Error("this.config.content is invalid");
-    }
-    if (!this.shadow) {
-      throw new Error("this.shadow is invalid");
+  /**
+   * Re-applies bindings after a state change with no new template render, and
+   * compiles any class they introduce for the first time — which this path
+   * used to skip, leaving such classes unstyled.
+   */
+  async refreshBindings() {
+    try {
+      this.applyBindings();
+      await this.applyStyles(this.candidatesFromDom());
+    } catch (e) {
+      console.error(`${LOG_PREFIX} binding refresh failed`, e);
     }
   }
 
   applyBindings() {
     if (!this._config?.bindings) return;
 
-    this._config.bindings.forEach((binding: Binding) => {
-      if (!binding.selector || !binding.bind || !binding.type) return;
-      const matches = this.shadow.querySelectorAll(binding.selector);
+    this._config.bindings.forEach((binding: Binding, index: number) => {
+      if (!binding?.selector || !binding.bind || !binding.type) return;
 
-      matches.forEach((match) => {
-        const result = this.resolveBindValue(match, binding.bind);
-        const target = match as HTMLElement;
-        const targetAsInput = target as HTMLInputElement;
-
-        switch (binding.type) {
-          case "text":
-            target.innerText = result;
-            break;
-          case "html":
-            target.innerHTML = result;
-            break;
-          case "class":
-            if (result) target.classList.add(result);
-            break;
-          case "checked":
-            targetAsInput.checked = Boolean(result);
-            break;
-          case "value":
-            targetAsInput.value = result;
-            break;
-          default:
-            if (typeof result === "undefined" || "" === `${result}`) {
-              target.removeAttribute(binding.type);
-            } else {
-              target.setAttribute(binding.type, result);
-            }
-            break;
-        }
+      safeQueryAll(this.shadow, binding.selector).forEach((match) => {
+        const result = this.resolveBindValue(match, binding);
+        this.applyBinding(match as HTMLElement, binding.type, result, index);
       });
     });
   }
 
+  applyBinding(
+    target: HTMLElement,
+    type: string,
+    result: unknown,
+    index: number,
+  ) {
+    const targetAsInput = target as HTMLInputElement;
+
+    switch (type) {
+      case "text":
+        // textContent, unlike innerText, doesn't force a layout.
+        target.textContent = result == null ? "" : String(result);
+        break;
+      case "html":
+        target.innerHTML = result == null ? "" : String(result);
+        break;
+      case "class":
+        this.swapBoundClasses(target, index, classTokens(result));
+        break;
+      case "checked":
+        targetAsInput.checked = Boolean(result);
+        break;
+      case "value":
+        targetAsInput.value = result == null ? "" : String(result);
+        break;
+      default:
+        if (typeof result === "undefined" || "" === `${result}`) {
+          target.removeAttribute(type);
+        } else {
+          target.setAttribute(type, String(result));
+        }
+        break;
+    }
+  }
+
+  /**
+   * Replaces the classes a binding added last time with its current ones.
+   *
+   * Classes the element already carried from the markup are never recorded
+   * as the binding's, so a binding can't strip them when its value changes.
+   */
+  swapBoundClasses(target: Element, index: number, next: string[]) {
+    const byBinding =
+      this._boundClasses.get(target) ?? new Map<number, string[]>();
+    const previous = byBinding.get(index) ?? [];
+
+    previous
+      .filter((name) => !next.includes(name))
+      .forEach((name) => target.classList.remove(name));
+
+    const added = next.filter(
+      (name) => previous.includes(name) || !target.classList.contains(name),
+    );
+    if (next.length) target.classList.add(...next);
+
+    byBinding.set(index, added);
+    this._boundClasses.set(target, byBinding);
+  }
+
   handleActions(e: Event) {
-    if (!this._config?.actions || !e.target) return;
+    if (!this._config?.actions || !(e.target instanceof Element)) return;
 
     const hass = this._hass;
     const config = this._config;
@@ -329,30 +473,36 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
     // Opens Home Assistant's own entity dialog, the way built-in cards do.
     const moreInfo = (entityId?: string) => this.fireMoreInfo(entityId);
 
-    this._config.actions.forEach(({ call, selector, type }: Action) => {
-      if (!selector || !call || !type) return;
+    const target = e.target;
 
-      const target = e.target as HTMLElement;
+    this._config.actions.forEach(({ call, selector, type }: Action) => {
+      if (!selector || !call || !type || type !== e.type) return;
 
       // `closest` rather than `matches` so an action bound to a card/tile
       // still fires when the user taps an icon or label inside it.
-      if (type === e.type && target.closest(selector)) {
-        const executeCall = new Function(
-          "hass",
-          "config",
-          "entity",
-          "moreInfo",
-          "event",
-          call,
+      const match = safeClosest(target, selector);
+      if (!match) return;
+
+      // One failing action mustn't stop the others, and its error should say
+      // which action it came from.
+      const report = (error: unknown) =>
+        console.error(
+          `${LOG_PREFIX} ${type} action on "${selector}" failed:`,
+          error,
         );
-        executeCall.call(
-          target.closest(selector),
+
+      try {
+        const result = compileUserCode(ACTION_PARAMS, call).call(
+          match,
           hass,
           config,
           entity,
           moreInfo,
           e,
         );
+        if (result instanceof Promise) result.catch(report);
+      } catch (error) {
+        report(error);
       }
     });
   }
@@ -377,29 +527,25 @@ export class TailwindTemplateCard extends TailwindTemplateRenderer {
     );
   }
 
-  resolveBindValue(element: Element, bind: string) {
+  resolveBindValue(element: Element, binding: Binding): unknown {
     if (!this._hass) return;
-    const entity = this._hass.states[this._config.entity];
+    const config: ConfigState = this._config;
+    const entity = this._hass.states[config.entity];
 
     try {
-      const getState = new Function(
-        "hass",
-        "config",
-        "entity",
-        "state",
-        "attr",
-        bind,
-      );
-      return getState.call(
+      return compileUserCode(BINDING_PARAMS, binding.bind).call(
         element,
         this._hass,
-        this._config,
+        config,
         entity,
         entity ? entity.state : undefined,
         entity ? entity.attributes : undefined,
       );
     } catch (e) {
-      console.log("BINDING --> FAILED", bind);
+      console.warn(
+        `${LOG_PREFIX} ${binding.type} binding on "${binding.selector}" failed:`,
+        e,
+      );
     }
   }
 }

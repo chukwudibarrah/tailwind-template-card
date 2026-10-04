@@ -1,7 +1,8 @@
 import { render } from 'preact'
+import { HomeAssistant } from 'custom-card-helpers'
 
 import { TailwindTemplateRenderer } from './TailwindTemplateRenderer'
-import { fulfillWithDefaults } from '@store/ConfigReducer'
+import { fulfillWithDefaults } from '@store/configDefaults'
 import { ConfigState } from '@types'
 import {
   CardEvents,
@@ -33,11 +34,7 @@ export class TailwindTemplateCardConfig extends TailwindTemplateRenderer {
   constructor () {
     super()
 
-    this._force_daisyui = true
-    this._ignore_broken_config = true
     this._rerender_after_set_config = false
-    this._rerender_after_set_hass = false
-    this._dispatch_config_setup_event = true
 
     // Mounted here, not in connectedCallback: Home Assistant may call
     // setConfig before the element is attached, and the configuration is
@@ -76,6 +73,18 @@ export class TailwindTemplateCardConfig extends TailwindTemplateRenderer {
     unregisterCardEventHandler(CardEvents.CONFIG_CHANGED, this._onConfigChanged)
     render(null, this.shadow)
     this._mounted = false
+  }
+
+  public set hass (hass: HomeAssistant) {
+    this._oldHass = this._hass
+    this._hass = hass
+    window.hass = hass
+    // Never re-mount a tree that disconnectedCallback just tore down.
+    if (this._mounted) this._render()
+  }
+
+  public get hass (): HomeAssistant | undefined {
+    return this._hass
   }
 
   configChanged (newConfig: ConfigState) {
