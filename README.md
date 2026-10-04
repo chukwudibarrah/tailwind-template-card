@@ -143,6 +143,8 @@ bindings:
 
 `type` may be `text`, `html`, `class`, `checked`, `value`, or any attribute name (`src`, `title`, `style`, …).
 
+A `class` binding may return several classes (`'bg-orange-400 ring-2'`) or nothing. When its value changes, the classes it added last time are removed, so the example above switches between orange and grey rather than collecting both. Classes already in your markup are never removed.
+
 ### 3. Actions — make it interactive
 
 Actions run JavaScript when someone interacts with a matching element.
@@ -185,6 +187,18 @@ call: "entity.turn_on({ brightness_pct: 40 })"
 
 **Nested elements just work.** Selectors match with `closest()`, so an action bound to a tile still fires when someone taps an icon or label inside it.
 
+**Keyboard.** Native `<button>`s are reachable and activated from the keyboard already. To make a `<div>` tile behave the same, give it `role="button"` and `tabindex="0"`: Enter and Space then fire its `click` actions.
+
+```html
+<div role="button" tabindex="0" data-toggle="light.desk" class="cursor-pointer rounded-xl p-4">Desk</div>
+```
+
+**Errors.** An action that throws logs which action failed (event and selector) to the browser console and doesn't stop the others from running. A selector that isn't valid CSS is skipped with a warning.
+
+### When a template is wrong
+
+If Home Assistant can't render the template, the card shows its error above the last version that did render, and clears it once the template works again. Warnings, such as an undefined variable, go to the browser console instead.
+
 ### When the card doesn't update
 
 For Jinja content, dependency tracking is automatic.
@@ -213,16 +227,29 @@ entities:
 | `actions` | `[]` | See [Actions](#3-actions--make-it-interactive). |
 | `plugins.daisyui.enabled` | `true` | Compile [daisyUI](https://daisyui.com) components into the card. |
 | `plugins.daisyui.themes` | `light --default, dark --prefersdark` | daisyUI theme list. |
-| `plugins.daisyui.theme` | `dark - dark` | Theme applied to this card. |
+| `plugins.daisyui.theme` | `auto` | Theme applied to this card. `auto` follows Home Assistant's light/dark mode; otherwise `<scheme> - <theme>`, e.g. `dark - dracula`. |
 | `plugins.daisyui.overrideCardBackground` | `false` | Let daisyUI paint the card background. |
 
-`plugins.daisyui.url` is accepted but ignored — daisyUI is compiled in rather than fetched from a CDN.
+`plugins.daisyui.url` and `plugins.tailwindElements` are accepted but ignored — daisyUI is compiled in rather than fetched from a CDN, and Tailwind Elements was never implemented.
+
+The visual editor writes back only the options you've changed from these defaults, so the card's YAML stays short.
+
+### Light and dark
+
+By default the card follows Home Assistant: daisyUI's `light` theme in light mode, `dark` in dark mode, switching live when Home Assistant does. Pick a specific theme (or use the sun/moon button in the editor) to pin one instead. A theme you set before this default existed — including the `dark - dark` older versions of the editor wrote into every card — is kept as it is; delete it from the YAML or choose "Follow Home Assistant" on the Plugins tab to switch.
+
+If you've changed `plugins.daisyui.themes`, keep `light` and `dark` in the list for `auto` to have themes to switch between.
+
+### Sections dashboards
+
+In a sections view the card defaults to full width, can be resized down to a quarter, and takes its height from its content.
 
 ## The config editor
 
 The visual editor uses Home Assistant's own `ha-code-editor`, so it inherits the
 frontend's theme, keybindings and entity autocompletion — type `states('` and it
-offers your entities.
+offers your entities. The entity field on the Tweaks tab is Home Assistant's own
+entity picker too, once the frontend has loaded it.
 
 That editor ships only `yaml` and `jinja2` CodeMirror languages, with no HTML
 mode, so tag handling is added on top:
@@ -293,15 +320,19 @@ It works by setting the custom properties `ha-card` itself reads
 unsets the background on the wrapper *inside* `ha-card`, and leaves Home
 Assistant's card surface painted underneath.
 
-> **card-mod does not work on this card.** It injects a `<style>` element into
-> the card's shadow root, and this card clears that root on every render, so the
-> styles are discarded. Use `bare` instead.
+> **card-mod.** Older versions cleared the card's shadow root on every render,
+> which discarded the styles card-mod injects. Updates now change only the
+> elements that changed, and anything else in the shadow root is left alone,
+> but this hasn't been tested with card-mod itself. `bare` is the supported way
+> to remove the card surface.
 
 ## Tailwind v4 notes
 
 This card runs **real Tailwind CSS v4**, so v4 syntax works: `size-*`, `text-balance`, container queries (`@container`), and the v4 gradient utilities (`bg-linear-to-r`). Colours are emitted in `oklch`/`oklab`.
 
-Classes are compiled from what the card is about to render, in two passes: the rendered HTML, then the live DOM once bindings have been applied.
+Classes are compiled from what the card is about to render, in two passes: the rendered HTML, then the live DOM once bindings have been applied. Every card with the same plugin settings shares one compiled stylesheet.
+
+When a template re-renders, the card updates only the elements that changed, rather than rebuilding everything. Focus, a half-typed input, a slider being dragged and CSS transitions (`transition-all` on a width or colour driven by state) all survive an update.
 
 Tailwind v4 implements gradients, transforms and shadows with registered custom
 properties (`@property`). Browsers ignore `@property` when it arrives inside a
@@ -331,8 +362,9 @@ The one case not covered is a class applied by your own JavaScript at some arbit
 | Shadow DOM | Copied every `<style>` from the document head into each card | Nothing copied; the shadow root stays isolated |
 | Config editor | Bundled Ace (~600 kB) | Home Assistant's own editor, with entity autocomplete and HTML tag closing |
 | Interaction | `click`, `dblclick`, `change`, `input` | Adds `hold`, `contextmenu` and `moreInfo()` |
-| Bundle | 976 kB (290 kB gzipped) | **790 kB (163 kB gzipped)** |
-| Tests | none | 49 browser-driven assertions |
+| Rendering | Shadow root cleared and rebuilt on every update | Morphed in place: focus, input and transitions survive |
+| Bundle | 976 kB (290 kB gzipped) | **845 kB (177 kB gzipped)** |
+| Tests | none | 99 browser-driven assertions, 19 unit tests |
 
 ### Why the subscription fix matters
 
@@ -359,13 +391,13 @@ npm install
 
 npm run dev     # Vite dev server
 npm run lint    # ESLint
-npm test        # builds, then runs the browser tests
+npm test        # unit tests, then builds and runs the browser tests
 npm run build   # production bundle into dist/
 ```
 
-`npm test` drives a real browser through Playwright. It uses your installed Chrome if there is one, otherwise Playwright's bundled Chromium (`npx playwright install chromium`).
+The unit tests in [`test/unit/`](test/unit/) cover the pure logic and run straight from TypeScript with `node --test`, which needs Node 22.18 or newer. `npm run test:browser` drives a real browser through Playwright. It uses your installed Chrome if there is one, otherwise Playwright's bundled Chromium (`npx playwright install chromium`).
 
-Before opening a pull request, please make sure `npm run lint` and `npm test` both pass, and add a test for any behaviour you change — the suite in [`test/run.mjs`](test/run.mjs) is plain JavaScript and easy to extend.
+Before opening a pull request, please make sure `npm run lint` and `npm test` both pass, and add a test for any behaviour you change — the browser suite in [`test/run.mjs`](test/run.mjs) is plain JavaScript and easy to extend.
 
 **Regenerating the README screenshot.** `npm run build && node scripts/screenshot.mjs`
 renders demo cards with the real bundle and writes `images/cards.png`, so the

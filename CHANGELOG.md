@@ -9,6 +9,87 @@ this fork's; upstream's generated history is kept at the bottom for reference.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The theme follows Home Assistant by default.** The default daisyUI theme
+  was a fixed `dark - dark`, so daisyUI components painted dark on a light
+  dashboard. The new default, `auto`, uses `light` or `dark` to match Home
+  Assistant and switches live with it. A theme already written into a card's
+  YAML — including the `dark - dark` that older versions of the editor wrote
+  into every card they touched — is kept.
+- **Updates morph the DOM instead of rebuilding it**, using
+  [idiomorph](https://github.com/bigskysoftware/idiomorph). The shadow root was
+  cleared and re-rendered on every template update, which dropped focus, reset
+  a slider mid-drag, discarded anything else in the shadow root and made CSS
+  transitions impossible. Unchanged elements now keep their identity.
+- The editor writes back only the options that differ from the defaults. It
+  used to write the whole filled-in config, so every card edited visually
+  carried a dozen default keys — the editor's own debounce period among them.
+  `getStubConfig` likewise offers only the demo content.
+- Cards with the same plugin settings share one compiled stylesheet, and every
+  card shares the editor's stylesheet, instead of each card parsing its own
+  copy of both.
+- The entity field in the editor is Home Assistant's `ha-entity-picker` once
+  the frontend has loaded it, and receives live `hass` updates; it used to read
+  a `window.hass` snapshot taken when the editor opened.
+- Editor tabs and the theme toggle are buttons, reachable from the keyboard.
+  The toggle's icon follows the card's theme rather than the operating system.
+- Dependencies: Preact 10.15 to 10.29 (the lockfile had pinned a 2023
+  release), daisyUI 5.7.47, Vite 8.3. CI runs on Node 24.
+
+### Added
+
+- Template errors are shown in the card, above the last good render, and clear
+  once the template renders again. They were only logged to the console,
+  leaving a blank card.
+- `role="button"` / `tabindex` elements fire their `click` actions on Enter
+  and Space.
+- `getGridOptions()` for sections dashboards: full width by default, down to a
+  quarter, height from content.
+- `setConfig` validates the config, so a malformed one shows Home Assistant's
+  error card with the reason instead of failing silently.
+- Unit tests for the pure logic (`node --test`), alongside the browser suite.
+- The release workflow runs the tests and refuses a tag that doesn't match
+  `package.json`. Dependabot watches npm and the workflow actions.
+
+### Fixed
+
+- A `class` binding never removed the class it added, so a binding switching
+  between `bg-amber-400` and `bg-sky-700` ended up with both, stuck on the
+  first. The classes a binding added last time are now replaced; classes from
+  the markup are left alone.
+- A `class` binding returning several classes threw, which also stopped every
+  binding after it and skipped compiling their styles.
+- A class first introduced by a binding after a state change was never
+  compiled: the update path that only re-applies bindings skipped the second
+  Tailwind pass.
+- Changing an option without touching `content` — `bare`, the theme — had no
+  effect until the content changed too.
+- `plugins: {}` crashed the render, and setting any one daisyUI option dropped
+  the default theme. Plugin options are now merged a level deep.
+- `ignore_line_breaks: false` rewrote newlines before Home Assistant rendered
+  the template, injecting `</br>` into multi-line Jinja tags and breaking them.
+  It now applies to the rendered HTML, and emits `<br>`.
+- An action that threw stopped the actions after it, and a selector that
+  isn't valid CSS — as one is while you're typing it — threw from every
+  binding and action. Both are now contained and logged with the rule they
+  came from.
+- A config given to the editor before its first frame was dropped, and the
+  editor showed the demo content in place of the card's own — ready to be
+  saved over it. Its listener is now registered during the first render.
+- Loading when no other custom card had created `window.customCards` threw,
+  keeping the card out of the card picker. Loading the resource twice no
+  longer throws either.
+
+### Removed
+
+- The "DaisyUI CSS URL" field and the disabled Tailwind Elements checkbox from
+  the editor. Both options are still accepted in YAML and still ignored.
+- Dead code: `HaCardConfigWrapper`, `SettingsAbout`, `FloatingInput`,
+  `TweakPluginInput`, `useConfigMemo` and the unused `CONFIG_SETUP` event.
+
 ## [4.3.0] - 2026-09-01
 
 ### Changed
@@ -196,6 +277,8 @@ configurations and community examples keep working.
 - Classes introduced by bindings (`type: class`, or markup injected via
   `type: html`) are compiled, via a second pass over the rendered DOM.
 
+[Unreleased]: https://github.com/chukwudibarrah/tailwind-template-card/compare/v4.3.0...HEAD
+[4.3.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.3.0
 [4.2.1]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.2.1
 [4.2.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.2.0
 [4.1.2]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.1.2
