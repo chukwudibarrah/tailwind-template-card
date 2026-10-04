@@ -10,6 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: HACS validation
+        # HACS documents tracking main; its last tagged release is from 2022.
         uses: hacs/action@main
         with:
           category: plugin
@@ -21,13 +22,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run lint
       - run: npx tsc --noEmit
-      - name: Build and run browser tests
-        run: |
-          npx playwright install --with-deps chromium
-          npm run build
-          node test/run.mjs
+      - run: npx playwright install --with-deps chromium
+      - name: Unit and browser tests
+        run: npm test
