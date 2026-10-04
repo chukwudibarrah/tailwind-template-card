@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "npm run build && node test/run.mjs",
+    "test": "npm run test:unit && npm run test:browser",
+    "test:unit": "node --test \"test/unit/*.test.ts\"",
+    "test:browser": "npm run build && node test/run.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

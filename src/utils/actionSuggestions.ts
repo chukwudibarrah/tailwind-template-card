@@ -1,5 +1,6 @@
-import { Action } from '@types'
-import { SelectorSuggestion, covers } from '@utils/contentScan'
+// Relative, type-only imports so the unit tests can load this in Node.
+import type { Action } from '../types/index.ts'
+import { type SelectorSuggestion, covers } from './contentScan.ts'
 
 /**
  * Prefilled actions for the attribute names that carry a settled meaning in
