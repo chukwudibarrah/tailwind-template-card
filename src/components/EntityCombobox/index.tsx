@@ -27,7 +27,13 @@ export function EntityCombobox ({
   const [highlighted, setHighlighted] = useState(0)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
-  const options = useMemo(() => Object.keys(hass.states).sort(), [hass.states])
+  // Only while the list is open: `hass` is replaced on every state change in
+  // the house, and re-sorting thousands of ids for a closed list is waste.
+  const states = open ? hass.states : null
+  const options = useMemo(
+    () => (states ? Object.keys(states).sort() : []),
+    [states]
+  )
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()

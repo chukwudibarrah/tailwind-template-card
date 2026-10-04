@@ -29,9 +29,6 @@ export const defaultConfigState: ConfigState = {
       theme: FOLLOW_HA_THEME,
       themes: 'light --default, dark --prefersdark',
       overrideCardBackground: false
-    },
-    tailwindElements: {
-      enabled: false
     }
   }
 }

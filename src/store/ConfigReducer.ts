@@ -9,7 +9,7 @@ import {
   registerCardEventHandler,
   unregisterCardEventHandler
 } from '@utils/events'
-import { useCallback, useEffect, useReducer } from 'preact/hooks'
+import { useCallback, useLayoutEffect, useReducer } from 'preact/hooks'
 import { fulfillWithDefaults, initialConfigState } from './configDefaults'
 
 export const ConfigReducer = (
@@ -52,8 +52,15 @@ export const useConfigReducer = () => {
    * accumulated listener then dispatched an update, causing another render and
    * another listener. The editor degraded with each keystroke until the page
    * was reloaded.
+   *
+   * A layout effect, not a plain one: Preact runs it before `render()`
+   * returns, while a plain effect waits for a later frame. The editor element
+   * mounts this tree in its constructor and Home Assistant can call
+   * `setConfig` straight after, so with a plain effect a config arriving
+   * before the first frame was dropped and the editor showed the demo content
+   * in place of the card's own — ready to be saved over it.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     const onConfigReceived = (e: Event) => {
       const config = (e as CustomEvent).detail.config as ConfigState
       updateConfig(fulfillWithDefaults(config), false)

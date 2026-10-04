@@ -2,7 +2,7 @@ import { render } from 'preact'
 import { HomeAssistant } from 'custom-card-helpers'
 
 import { TailwindTemplateRenderer } from './TailwindTemplateRenderer'
-import { fulfillWithDefaults } from '@store/configDefaults'
+import { fulfillWithDefaults, withoutDefaults } from '@store/configDefaults'
 import { ConfigState } from '@types'
 import {
   CardEvents,
@@ -10,8 +10,8 @@ import {
   registerCardEventHandler,
   unregisterCardEventHandler
 } from '@utils/events'
-// import { HaCardConfigWrapper } from '@components/HaCardConfigWrapper'
 import { ConfigProvider } from '@store/ConfigProvider'
+import { HassContext } from '@store/HassContext'
 import { HaCardConfig } from '@components/HaCardConfig'
 import React from 'preact/compat'
 
@@ -75,10 +75,10 @@ export class TailwindTemplateCardConfig extends TailwindTemplateRenderer {
     this._mounted = false
   }
 
+  /** Re-render so the entity picker and theme see the current `hass`. */
   public set hass (hass: HomeAssistant) {
     this._oldHass = this._hass
     this._hass = hass
-    window.hass = hass
     // Never re-mount a tree that disconnectedCallback just tore down.
     if (this._mounted) this._render()
   }
@@ -87,11 +87,12 @@ export class TailwindTemplateCardConfig extends TailwindTemplateRenderer {
     return this._hass
   }
 
+  /** Writes back only what differs from the defaults, keeping YAML readable. */
   configChanged (newConfig: ConfigState) {
     const event = new CustomEvent('config-changed', {
       bubbles: true,
       composed: true,
-      detail: { config: newConfig }
+      detail: { config: withoutDefaults(newConfig) }
     })
 
     this.dispatchEvent(event)
@@ -99,9 +100,11 @@ export class TailwindTemplateCardConfig extends TailwindTemplateRenderer {
 
   _render () {
     render(
-      <ConfigProvider>
-        <MemoizedCardConfig />
-      </ConfigProvider>,
+      <HassContext.Provider value={this._hass}>
+        <ConfigProvider>
+          <MemoizedCardConfig />
+        </ConfigProvider>
+      </HassContext.Provider>,
       this.shadow
     )
   }

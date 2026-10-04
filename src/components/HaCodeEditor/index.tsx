@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { TextareaEditor } from '@components/TextareaEditor'
+import { useElementDefined } from '@utils/useElementDefined'
 import { closeTagEdit, expandTagEdit, indentOf } from './htmlEditing'
 
 /**
@@ -38,9 +39,6 @@ type HaCodeEditorElement = HTMLElement & {
 }
 
 const ELEMENT_NAME = 'ha-code-editor'
-
-/** How long to wait for Home Assistant to lazily register its editor. */
-const DEFINITION_TIMEOUT_MS = 4000
 
 /**
  * Restores the tag handling upstream's Ace editor provided.
@@ -118,34 +116,13 @@ export function HaCodeEditor ({
   html?: boolean
   className?: string
 }) {
-  const [available, setAvailable] = useState(
-    () => Boolean(customElements.get(ELEMENT_NAME))
-  )
+  const available = useElementDefined(ELEMENT_NAME)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<HaCodeEditorElement | null>(null)
 
   // Keep the latest callback without re-creating the editor on every render.
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
-
-  useEffect(() => {
-    if (available) return
-
-    let cancelled = false
-    const timeout = window.setTimeout(() => {
-      cancelled = true
-    }, DEFINITION_TIMEOUT_MS)
-
-    customElements.whenDefined(ELEMENT_NAME).then(() => {
-      window.clearTimeout(timeout)
-      if (!cancelled) setAvailable(true)
-    })
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(timeout)
-    }
-  }, [available])
 
   useEffect(() => {
     const container = containerRef.current

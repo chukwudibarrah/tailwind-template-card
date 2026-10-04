@@ -77,7 +77,8 @@ export type ConfigState = {
   parse_jinja: boolean
   plugins: {
     daisyui: PluginOptions & DaisyUIOptions
-    tailwindElements: PluginOptions
+    /** @deprecated Never implemented; accepted so old configs still load. */
+    tailwindElements?: PluginOptions
   }
   /** @deprecated Ignored; Home Assistant's editor is always used. */
   code_editor?: string
