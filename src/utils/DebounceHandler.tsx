@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'preact/hooks'
 
 export class DebounceHandler {
   debounceChangePeriod: number
-  timeoutPointer: NodeJS.Timeout | null = null
+  timeoutPointer: ReturnType<typeof setTimeout> | null = null
 
   constructor (debounceChangePeriod: number) {
     this.debounceChangePeriod = debounceChangePeriod
