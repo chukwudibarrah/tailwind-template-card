@@ -1,4 +1,5 @@
-import { PropsWithChildren, StateUpdater, useState } from 'preact/compat'
+import { PropsWithChildren, useState } from 'preact/compat'
+import type { Dispatch, StateUpdater } from 'preact/hooks'
 import clsx from 'clsx'
 import { SettingsTweaks } from '@pages/SettingsTweaks'
 import { SettingsCardContent } from '@pages/SettingsCardContent'
@@ -16,7 +17,7 @@ const ConfigTab = ({
   tabKey,
   children
 }: PropsWithChildren & {
-  activeState: [ActiveTabState, StateUpdater<ActiveTabState>]
+  activeState: [ActiveTabState, Dispatch<StateUpdater<ActiveTabState>>]
   tabKey: number
 }) => {
   const [activeTab, setActiveTab] = activeState

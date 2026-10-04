@@ -31,7 +31,7 @@ export function FloatingInput ({
         className='input'
         defaultValue={value}
         onChange={e => onChange((e.target as HTMLInputElement).value)}
-        spellCheck={false}
+        spellcheck={false}
       />
       <label
         for='floating_outlined'

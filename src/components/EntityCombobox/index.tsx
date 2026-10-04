@@ -86,7 +86,7 @@ export function EntityCombobox ({
           aria-autocomplete='list'
           class='input pr-12 w-full placeholder:opacity-50 rounded-btn'
           placeholder='Pick an entity'
-          spellCheck={false}
+          spellcheck={false}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           onInput={e => {
