@@ -9,7 +9,7 @@ this fork's; upstream's generated history is kept at the bottom for reference.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.4.0] - 2026-10-04
 
 ### Changed
 
@@ -37,7 +37,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Editor tabs and the theme toggle are buttons, reachable from the keyboard.
   The toggle's icon follows the card's theme rather than the operating system.
 - Dependencies: Preact 10.15 to 10.29 (the lockfile had pinned a 2023
-  release), daisyUI 5.7.47, Vite 8.3. CI runs on Node 24.
+  release), daisyUI 5.7.47, Vite 8.3. CI runs on Node 24, and the project
+  typechecks under TypeScript 6 as well as 5.9 (`baseUrl` dropped from
+  `tsconfig.json`).
 
 ### Added
 
@@ -277,7 +279,7 @@ configurations and community examples keep working.
 - Classes introduced by bindings (`type: class`, or markup injected via
   `type: html`) are compiled, via a second pass over the rendered DOM.
 
-[Unreleased]: https://github.com/chukwudibarrah/tailwind-template-card/compare/v4.3.0...HEAD
+[4.4.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.4.0
 [4.3.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.3.0
 [4.2.1]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.2.1
 [4.2.0]: https://github.com/chukwudibarrah/tailwind-template-card/releases/tag/v4.2.0
